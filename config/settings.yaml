@@ -1,0 +1,59 @@
+# ============================================================
+# StockTradingSystem 設定檔
+# 可由 WebUI「設定中心」表單化編輯（會保留本註解）。
+# ============================================================
+
+# ---- 資料層 ----
+data:
+  db_path: data/market.db          # SQLite 資料庫位置
+  backfill_start: '2020-01-01'     # 歷史回補起始日（近 ~5 年）
+  finmind:
+    base_url: https://api.finmindtrade.com/api/v4/data
+    request_interval_sec: 0.35     # 每次請求間隔（避免觸發頻率限制）
+    max_retries: 4
+
+# ---- 股票池篩選（Phase 0 只做基本排除，處置/警示於後續階段強化）----
+universe:
+  markets:                         # 上市 + 上櫃
+    - twse
+    - tpex
+  include_etf: false               # 是否納入 ETF
+  exclude_full_delivery: true      # 排除全額交割股（需事件資料，旗標保留）
+  exclude_disposition: true        # 排除處置股（同上）
+  min_stock_id_len: 4              # 一般普通股代號為 4 碼
+
+# ---- 選股 Screener（Phase 1）----
+screener:
+  top_n: 30                        # 最終選出檔數
+  min_avg_turnover: 20000000       # 20 日均成交額下限（元），濾除低流動性
+  momentum_lookback:               # 動能回看天數
+    - 20
+    - 60
+  chips_lookback: 20               # 籌碼（法人淨買）回看天數
+  weights:                         # 因子權重（會正規化；正值代表越高越好）
+    momentum_20: 1.0
+    momentum_60: 0.8
+    chips_net_buy: 1.2             # 法人淨買（外資+投信）
+    revenue_yoy: 1.0               # 月營收年增率
+    above_ma60: 0.5               # 站上季線
+
+# ---- 資金 / 風險（Phase 3 生效，先放預設值供 WebUI 顯示）----
+capital:
+  total: 1000000                   # 總資金（TWD）
+risk:
+  per_trade_risk_pct: 1.0          # 單筆最大風險（佔總資金 %）
+  max_single_position_pct: 15.0    # 單一持股上限 %
+  min_reward_risk_ratio: 1.5       # R:R 下限
+  cooldown_days: 5                 # 停損後同標的冷卻天數
+  max_drawdown_halt_pct: 15.0      # 回撤熔斷門檻 %
+
+# ---- LLM（Phase 2 生效）----
+llm:
+  analyst_model: claude-haiku-4-5-20251001
+  trader_model: claude-haiku-4-5-20251001
+  reflection_model: claude-haiku-4-5-20251001
+
+# ---- 日誌 ----
+logging:
+  level: INFO
+  dir: logs

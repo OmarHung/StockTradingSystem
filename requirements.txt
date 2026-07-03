@@ -1,0 +1,24 @@
+# ⚠️ Apple Silicon (arm64) 安裝注意：
+# 若透過 Rosetta/x86_64 的 shell 安裝，含 C 擴充的套件（numpy/pandas/pyarrow）會裝成
+# x86_64 wheel，導致原生 arm64（PyCharm/終端機）執行時 ImportError（架構不符）。
+# 請用：  arch -arm64 .venv/bin/python -m pip install -r requirements.txt
+
+# --- Phase 0：資料層 ---
+requests>=2.31
+pandas>=2.2
+pyyaml>=6.0
+python-dotenv>=1.0
+tenacity>=8.2          # API 重試
+tqdm>=4.66             # 回補進度條
+ruamel.yaml>=0.18      # 保留註解的 YAML 讀寫（WebUI 存檔用）
+
+# --- Phase 1：回測 + WebUI ---
+streamlit>=1.40        # WebUI
+plotly>=5.20           # 圖表
+
+# --- Phase 2：LLM Agent ---
+anthropic>=0.116        # Claude API（分析師/交易員/反思）
+pydantic>=2.0           # 結構化輸出 schema
+
+# --- 開發 ---
+pytest>=8.0

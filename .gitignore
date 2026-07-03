@@ -1,0 +1,15 @@
+# 環境
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# 資料與日誌（不入版控）
+data/*.db
+data/*.db-journal
+data/*.parquet
+logs/*.log
+logs/jobs/
+
+# IDE
+.idea/claudeCodeTabState.xml
