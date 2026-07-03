@@ -1,0 +1,73 @@
+import { useState } from "react";
+import { api } from "../api";
+import { Panel, fmt } from "./Panel";
+
+const ACTION: Record<string, { cls: string; label: string }> = {
+  buy: { cls: "buy", label: "買進" },
+  hold: { cls: "hold", label: "觀望" },
+  avoid: { cls: "avoid", label: "避開" },
+};
+
+/** AI 選股報告：跑分析師團隊 + 驗證層 + 交易員，顯示交易計畫。 */
+export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (id: string) => void }) {
+  const [asOf, setAsOf] = useState("2025-06-30");
+  const [topN, setTopN] = useState(3);
+  const [recs, setRecs] = useState<Record<string, any>[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const run = async () => {
+    setLoading(true);
+    try { setRecs(await api.analyze(asOf, topN)); }
+    catch (e) { alert(String(e)); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <Panel title="AI 選股報告" icon="🧑‍💼"
+      right={
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+          <input type="number" min={1} max={10} value={topN} style={{ width: 48 }}
+            onChange={(e) => setTopN(+e.target.value)} />
+          <button className="btn primary" onClick={run} disabled={loading || !hasKey}>分析</button>
+        </div>
+      }>
+      {!hasKey && <div className="empty-hint">未設定 ANTHROPIC_API_KEY，無法執行 LLM 分析。</div>}
+      {loading && <div className="spinner">分析師團隊 + 交易員決策中（每檔約 4 次 LLM 呼叫）…</div>}
+      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+        {[...recs].sort((a, b) => b.plan.action_score - a.plan.action_score).map((rec) => {
+          const p = rec.plan;
+          const a = ACTION[p.action] ?? { cls: "hold", label: p.action };
+          return (
+            <div key={rec.stock_id} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={`tag ${a.cls}`}>{a.label}</span>
+                <b style={{ cursor: "pointer" }} onClick={() => onSelect(rec.stock_id)}>{rec.stock_id}</b>
+                <span className="mono" style={{ color: "var(--text-dim)" }}>
+                  動作分 {p.action_score > 0 ? "+" : ""}{fmt(p.action_score)} · 信心 {fmt(p.confidence * 100, 0)}%
+                </span>
+                <div style={{ flex: 1 }} />
+                <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                  進 {fmt(p.entry_low)}~{fmt(p.entry_high)} · 損 {fmt(p.stop_loss)} · 標 {fmt(p.target_price)} · R:R {fmt(p.reward_risk)}
+                </span>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>{p.rationale}</div>
+              <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {Object.entries(rec.analysts ?? {}).map(([k, e]: [string, any]) => (
+                  <span key={k} style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                    {({ technical: "技術", chips: "籌碼", fundamental: "基本" } as any)[k] ?? k}:{" "}
+                    <span className={e.report.score > 0 ? "up" : e.report.score < 0 ? "down" : "flat"}>
+                      {e.report.signal} {fmt(e.report.score)}
+                    </span>
+                    {e.validation_flags?.length ? " ⚠️" : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {!loading && recs.length === 0 && hasKey && <div className="empty-hint">選日期與檔數後按「分析」</div>}
+      </div>
+    </Panel>
+  );
+}

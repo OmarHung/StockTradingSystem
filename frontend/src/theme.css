@@ -1,0 +1,154 @@
+/* ============================================================
+   設計系統 — 深色專業交易終端主題
+   台股慣例：紅漲綠跌（與美股相反）
+   ============================================================ */
+:root {
+  --bg: #0a0e17;
+  --panel: #131722;
+  --panel-header: #171b28;
+  --panel-header-hover: #1e2332;
+  --border: #232838;
+  --border-light: #2a3040;
+
+  --text: #d1d4dc;
+  --text-dim: #787b86;
+  --text-bright: #ffffff;
+
+  --up: #ff433d;      /* 台股：漲=紅 */
+  --down: #0ecb81;    /* 台股：跌=綠 */
+  --flat: #787b86;
+
+  --accent: #2962ff;
+  --accent-dim: #1e3a8a;
+  --warning: #f0b90b;
+
+  --radius: 6px;
+  --font: -apple-system, "SF Pro Text", "Segoe UI", "PingFang TC",
+          "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", "Roboto Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4155; }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.flat { color: var(--flat); }
+
+/* ---- 頂部 bar ---- */
+.topbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.topbar .logo { font-weight: 700; font-size: 15px; color: var(--text-bright); letter-spacing: 0.3px; }
+.topbar .badge {
+  font-size: 11px; padding: 3px 8px; border-radius: 4px;
+  background: var(--accent-dim); color: #8ab4ff; border: 1px solid var(--accent);
+}
+.topbar .ticker { display: flex; align-items: baseline; gap: 6px; }
+.topbar .ticker .label { color: var(--text-dim); font-size: 11px; }
+.topbar .ticker .val { font-family: var(--mono); font-weight: 600; font-size: 14px; }
+.topbar .spacer { flex: 1; }
+.topbar .clock { font-family: var(--mono); color: var(--text-dim); }
+.topbar .live { display: flex; align-items: center; gap: 5px; color: var(--down); font-size: 11px; }
+.topbar .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--down); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ---- 面板外框 ---- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.panel-header {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--panel-header);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: move;
+  flex-shrink: 0;
+  user-select: none;
+}
+.panel-header .icon { opacity: 0.8; }
+.panel-header .sub { color: var(--text-dim); font-weight: 400; font-size: 11px; }
+.panel-body { flex: 1; overflow: auto; }
+
+/* ---- 表格 ---- */
+table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.grid th {
+  position: sticky; top: 0; background: var(--panel-header);
+  color: var(--text-dim); font-weight: 500; text-align: right;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 11px;
+}
+table.grid th:first-child { text-align: left; }
+table.grid td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #1a1e2a; }
+table.grid td:first-child { text-align: left; }
+table.grid tr:hover td { background: #1a1f2e; }
+table.grid tr.active td { background: #1e2740; }
+
+/* ---- 通用元件 ---- */
+.btn {
+  background: var(--panel-header); color: var(--text);
+  border: 1px solid var(--border-light); border-radius: 4px;
+  padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: var(--font);
+}
+.btn:hover { background: var(--panel-header-hover); border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover { background: #1e52e0; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+input, select {
+  background: #0d1119; color: var(--text);
+  border: 1px solid var(--border-light); border-radius: 4px;
+  padding: 5px 8px; font-size: 12px; font-family: var(--font);
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+.metric { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+.metric .m-label { color: var(--text-dim); font-size: 11px; }
+.metric .m-value { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+
+.tag { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+.tag.buy { background: rgba(255,67,61,0.15); color: var(--up); }
+.tag.hold { background: rgba(240,185,11,0.15); color: var(--warning); }
+.tag.avoid { background: rgba(14,203,129,0.15); color: var(--down); }
+
+.empty-hint { color: var(--text-dim); font-size: 12px; padding: 20px; text-align: center; }
+.spinner { color: var(--accent); font-size: 12px; padding: 14px; text-align: center; }
+
+/* ---- react-grid-layout ---- */
+.react-grid-item.react-grid-placeholder { background: var(--accent) !important; opacity: 0.2; border-radius: var(--radius); }
+.react-grid-item > .react-resizable-handle { z-index: 5; }
+.react-grid-item > .react-resizable-handle::after {
+  border-right-color: var(--border-light); border-bottom-color: var(--border-light);
+}

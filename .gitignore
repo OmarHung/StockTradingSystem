@@ -11,5 +11,11 @@ data/*.parquet
 logs/*.log
 logs/jobs/
 
+# 前端（React）
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
 # IDE
 .idea/claudeCodeTabState.xml
