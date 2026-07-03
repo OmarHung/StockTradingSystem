@@ -16,9 +16,19 @@
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env        # 選填 FINMIND_TOKEN 以提高 API 額度
+# ⚠️ Apple Silicon 請用 arch -arm64（見 requirements.txt 說明）
+arch -arm64 .venv/bin/pip install -r requirements.txt
+cp .env.example .env        # 選填 FINMIND_TOKEN / ANTHROPIC_API_KEY
 ```
+
+## 兩種 UI
+
+| UI | 啟動 | 定位 |
+|---|---|---|
+| **React 交易終端**（專業、推薦） | `bash scripts/dev.sh` → http://localhost:5173 | 深色多面板：自選清單/K線/選股/AI報告/回測，可拖曳重排 |
+| Streamlit（研究/設定） | `.venv/bin/streamlit run webui/app.py` | 表單化設定中心、資料回補、詳細報告 |
+
+React 終端技術棧（對齊 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)）：React 19 + Vite + TradingView lightweight-charts + react-grid-layout；後端 FastAPI（`api/main.py`）包裝現有 Python 邏輯。
 
 ## Phase 0 使用方式
 
