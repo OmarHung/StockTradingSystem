@@ -3,11 +3,12 @@ import { api, type Quote } from "../api";
 import { fmt, cls } from "./Panel";
 
 /** 頂部狀態列：logo、券商環境徽章、大盤指標、時鐘、資料連線狀態、設定。 */
-export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData }: {
+export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBrowser }: {
   hasKey: boolean | null;
   brokerEnv: "simulation" | "production" | null;
   onOpenSettings: () => void;
   onOpenData: () => void;
+  onOpenBrowser: () => void;
 }) {
   const [now, setNow] = useState(new Date());
   const [indices, setIndices] = useState<Quote[]>([]);
@@ -45,6 +46,7 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData }: {
       <span className="badge" style={hasKey ? {} : { background: "#3a2a1a", color: "#f0b90b", borderColor: "#5a3a1a" }}>
         {hasKey === null ? "…" : hasKey ? "AI 已啟用" : "AI 未設 Key"}
       </span>
+      <button className="btn" onClick={onOpenBrowser}>🗂 股票</button>
       <button className="btn" onClick={onOpenData}>📦 資料</button>
       <button className="btn" onClick={onOpenSettings}>⚙️ 設定</button>
       <span className="clock">{now.toLocaleTimeString("zh-TW", { hour12: false })}</span>

@@ -75,6 +75,8 @@ export const api = {
   price: (id: string, limit = 250, tf = "D") =>
     get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}`),
   indices: () => get<Quote[]>("/indices"),
+  stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
+  stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),
   qualityCheck: () => get<Record<string, any>>("/quality-check"),
   scanner: (kind: string, count = 20) =>
     get<Record<string, any>[]>(`/scanner?kind=${kind}&count=${count}`),

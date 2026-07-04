@@ -15,6 +15,7 @@ import { BrainPanel } from "./components/BrainPanel";
 import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { DataModal } from "./components/DataModal";
+import { StockBrowserModal } from "./components/StockBrowserModal";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { PortfolioPanel } from "./components/PortfolioPanel";
 
@@ -39,6 +40,7 @@ export default function App() {
   const [brokerEnv, setBrokerEnv] = useState<"simulation" | "production" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showData, setShowData] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
 
   const { width, containerRef } = useContainerWidth();
@@ -61,9 +63,11 @@ export default function App() {
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <TopBar hasKey={hasKey} brokerEnv={brokerEnv}
         onOpenSettings={() => setShowSettings(true)}
-        onOpenData={() => setShowData(true)} />
+        onOpenData={() => setShowData(true)}
+        onOpenBrowser={() => setShowBrowser(true)} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
       {showData && <DataModal onClose={() => setShowData(false)} />}
+      {showBrowser && <StockBrowserModal onClose={() => setShowBrowser(false)} onSelect={setSelected} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <GridLayout
           className="layout"

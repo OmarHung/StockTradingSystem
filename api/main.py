@@ -81,6 +81,18 @@ def stocks():
     return _records(df)
 
 
+@app.get("/api/stocks/overview")
+def stocks_overview():
+    """全市場股票總覽（含未下載/處置股）：市場、產業、下載狀態。"""
+    return q.stocks_overview()
+
+
+@app.get("/api/stocks/{stock_id}/detail")
+def stock_detail(stock_id: str):
+    """單一股票資料總覽：覆蓋範圍 + 最新報價/籌碼/融資/營收 + 處置狀態。"""
+    return q.stock_detail(stock_id)
+
+
 # ---------- 行情 ----------
 @app.get("/api/price/{stock_id}")
 def price(stock_id: str, start: str | None = None, end: str | None = None,

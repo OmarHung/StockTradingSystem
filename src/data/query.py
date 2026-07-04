@@ -300,6 +300,91 @@ def list_stocks() -> pd.DataFrame:
         return db.read_sql(conn, "SELECT * FROM stock_info ORDER BY stock_id")
 
 
+def stocks_overview() -> list[dict]:
+    """全市場股票總覽（含尚未下載/處置股），供 WebUI 股票瀏覽器。
+
+    每檔附：市場、產業、資料下載狀態（價格天數/最後日期）、是否處置中。
+    """
+    import datetime as dt
+    today = dt.date.today().isoformat()
+    with db.connect(_db_path()) as conn:
+        df = db.read_sql(conn, """
+            SELECT s.stock_id, s.stock_name, s.industry_category, s.type AS market,
+                   COALESCE(p.n, 0) AS price_days, p.last_date AS price_last
+            FROM stock_info s
+            LEFT JOIN (SELECT stock_id, COUNT(*) AS n, MAX(date) AS last_date
+                       FROM price_daily GROUP BY stock_id) p
+              ON p.stock_id = s.stock_id
+            ORDER BY s.stock_id
+        """)
+        disp = {r[0] for r in conn.execute(
+            "SELECT DISTINCT stock_id FROM disposition WHERE period_start<=? AND period_end>=?",
+            (today, today))}
+    out = []
+    for r in df.itertuples():
+        out.append({
+            "stock_id": r.stock_id, "name": r.stock_name or "",
+            "industry": r.industry_category or "（未分類）",
+            "market": r.market or "",
+            "price_days": int(r.price_days),
+            # LEFT JOIN 無資料時是 NaN，轉 None 才是合法 JSON
+            "price_last": r.price_last if isinstance(r.price_last, str) else None,
+            "downloaded": int(r.price_days) > 0,
+            "disposition": r.stock_id in disp,
+        })
+    return out
+
+
+def stock_detail(stock_id: str) -> dict:
+    """單一股票的資料總覽：基本資料 + 各資料集覆蓋 + 最新關鍵數據。"""
+    with db.connect(_db_path()) as conn:
+        info = db.read_sql(conn, "SELECT * FROM stock_info WHERE stock_id=?", (stock_id,))
+        detail: dict = {
+            "stock_id": stock_id,
+            "name": info.iloc[0]["stock_name"] if not info.empty else "",
+            "industry": (info.iloc[0]["industry_category"] if not info.empty else "") or "（未分類）",
+            "market": info.iloc[0]["type"] if not info.empty else "",
+        }
+        # 各資料集覆蓋範圍
+        cov = {}
+        for table, label in (("price_daily", "股價日K"), ("institutional", "三大法人"),
+                             ("margin", "融資融券"), ("dividend", "除權息")):
+            r = db.read_sql(conn, f"SELECT COUNT(*) n, MIN(date) lo, MAX(date) hi "
+                                  f"FROM {table} WHERE stock_id=?", (stock_id,)).iloc[0]
+            cov[table] = {"label": label, "rows": int(r["n"]), "from": r["lo"], "to": r["hi"]}
+        rev = db.read_sql(conn, "SELECT COUNT(*) n, MAX(revenue_year*100+revenue_month) ym "
+                                "FROM month_revenue WHERE stock_id=?", (stock_id,)).iloc[0]
+        cov["month_revenue"] = {"label": "月營收", "rows": int(rev["n"]),
+                                "from": None, "to": (str(rev["ym"])[:4] + "-" + str(rev["ym"])[4:]) if rev["ym"] else None}
+        detail["coverage"] = cov
+        # 處置狀態
+        disp = db.read_sql(conn, "SELECT reason, period_start, period_end FROM disposition "
+                                 "WHERE stock_id=? ORDER BY period_end DESC LIMIT 1", (stock_id,))
+        detail["disposition"] = disp.to_dict(orient="records")[0] if not disp.empty else None
+
+    # 最新關鍵數據（還原價、法人5日、融資餘額、營收YoY）——資料不足時各自為空
+    px = get_price(stock_id, adjusted=True)
+    if not px.empty:
+        last, prev = px.iloc[-1], (px.iloc[-2] if len(px) > 1 else px.iloc[-1])
+        detail["quote"] = {
+            "date": last["date"], "close": float(last["close"]),
+            "change_pct": round((float(last["close"]) / float(prev["close"]) - 1) * 100, 2) if float(prev["close"]) else 0,
+            "volume": int(last["volume"] or 0),
+        }
+    try:
+        from src.agents import features as F
+        detail["chips"] = F.chips_features(stock_id, px.iloc[-1]["date"]) if not px.empty else {}
+        detail["fundamental"] = F.fundamental_features(
+            stock_id, px.iloc[-1]["date"] if not px.empty else "2099-12-31")
+    except Exception:  # noqa: BLE001
+        pass
+    with db.connect(_db_path()) as conn:
+        m = db.read_sql(conn, "SELECT date, margin_purchase_balance, short_sale_balance "
+                              "FROM margin WHERE stock_id=? ORDER BY date DESC LIMIT 1", (stock_id,))
+        detail["margin"] = m.to_dict(orient="records")[0] if not m.empty else None
+    return detail
+
+
 def brain_log(limit: int = 100, as_of: str | None = None) -> pd.DataFrame:
     """讀取最近的 LLM 呼叫/驗證記錄（供大腦活動頁）。"""
     sql = "SELECT id, ts, as_of, stock_id, agent, model, prompt, response, note FROM brain_log"
