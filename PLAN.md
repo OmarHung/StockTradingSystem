@@ -170,14 +170,16 @@ StockTradingSystem/
   端到端 2330 過閘核准 61 股（風險 <1% 資金）
 - ⏳ 移動停利與「駁回若成交會如何」的追蹤 → 併入 Phase 4 反思 / Phase 5 實倉
 
-### Phase 4：Reflection + 向量記憶（約 1.5–2 週）→「持續檢討、學習、優化」核心
-- ChromaDB 三個 collection：交易經驗 / 語意規則 / 被擋交易
-- 每筆平倉自動寫入經驗（進場情境快照 + 決策理由 + 結果 + 檢討）
-- 每日反思：昨日決策 vs 實際結果；每 N 筆平倉 + 每週深度反思：合成「有效規則」與「反模式」存入規則庫，並歸因（哪類訊號有效/無效）、調整風格（保守↔積極）
-- 決策時語意檢索：相似歷史情境 + 適用規則 注入交易員 prompt
-- A/B 回測：有無 memory/reflection 的績效對比
-- WebUI 新增：📚 反思規則庫頁（瀏覽/搜尋已學到的規則與反模式、手動停用某條規則）
-- ✅ 驗收：記憶庫隨時間累積且可檢索到語意相似情境；回測顯示 reflection 版本表現 ≥ 無 reflection 版
+### Phase 4：Reflection + 向量記憶（約 1.5–2 週）→「持續檢討、學習、優化」核心 ✅ 完成
+- [x] ChromaDB 三 collection（experiences/rules/blocked），中文語意檢索實測可用
+- [x] 成果評估器：過去 trade_plan 用後續真實價格評分（限價成交模擬/觸損觸標/20日horizon；
+  hold/avoid 記假如報酬）——實倉前就能轉動檢討閉環
+- [x] 反思引擎：統計+樣本 → LLM 歸納規則/反模式+風格建議 → 規則庫
+- [x] 決策注入：trader prompt 自動帶入相似經驗+啟用規則（memory_context）
+- [x] UI 📚 反思規則庫面板（一鍵反思、規則停用切換）；API /memory/* /reflect/run
+- ✅ 驗收：8 筆真實決策評估→4 條反模式入庫→行為改變實證（2330 注入前 buy→注入後 hold，
+  理由對照規則檢查）；30 tests passed
+- ⏳ A/B 回測（有無 reflection 績效對比）：需累積更多樣本，Phase 5 實倉數據足夠後執行
 
 ### Phase 5：模擬交易上線（約 2–4 週實跑）→ 對應需求 5、6
 - shioaji 模擬環境接入（PaperBroker），launchd 每日全自動：盤後更新資料 → 決策 → 隔日開盤前掛單 → 盤中停損監控
