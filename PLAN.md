@@ -160,13 +160,15 @@ StockTradingSystem/
 - ✅ 驗收全通過：features 實算正確、驗證層能攔截錯誤宣稱、R:R≥1.5 生效、fallback chain 運作、WebUI 無錯誤
 - 📌 後續增強（標記，非本階段阻塞）：新聞分析師 + RAG 過濾、mplfinance 視覺 K 線雙模輸入、LLM 策略歷史回測
 
-### Phase 3：資金控管 + Guard pipeline 風控（約 1–1.5 週）→ 對應需求 3、4
-- 部位規模：risk-based sizing（單筆風險 1% 資金 / 停損距離）
-- Guard pipeline（依序過閘，任一不過即駁回並記錄原因）：
-  白名單/黑名單 → R:R ≥ 1.5 → 冷卻期（停損後同標的 N 日不再進）→ 單股 ≤15% → 產業曝險上限 → 總持倉上限
-- 強制停損、移動停利；熔斷機制：回撤超限自動降倉停機
-- Friction report：被駁回的交易記錄「若成交會如何」，供反思層評估風控是否過嚴/過鬆
-- ✅ 驗收：風控單元測試全過；回測中 MDD 明顯受控；friction report 可查
+### Phase 3：資金控管 + Guard pipeline 風控（約 1–1.5 週）→ 對應需求 3、4 ✅ 完成
+- [x] `src/risk/guard.py` 九閘 pipeline：黑名單/處置股 → 回撤熔斷 → 計畫合理性 → R:R≥1.5 →
+  停損冷卻 → 風險部位（1%資金/停損距離，整張優先高價退零股）→ 單股15%（縮減）→ 產業曝險30% → 現金/持倉數
+- [x] LLM 管線整合：buy 計畫必過 Guard；核准附具體股數/投入/最大風險；駁回寫 friction_log
+- [x] 回測策略 screener_risk：風險部位權重 + ATR×2 停損 + 冷卻 + **大盤濾網**（TAIEX<MA60→曝險×0.5）
+- [x] UI：報告卡顯示 🛡️核准部位/駁回原因；API /api/friction
+- ✅ 驗收全過：23 tests；2 年全市場實測 MDD -30.9%→-21.8%、波動 43.6%→25.6%、Sharpe 幾乎持平；
+  端到端 2330 過閘核准 61 股（風險 <1% 資金）
+- ⏳ 移動停利與「駁回若成交會如何」的追蹤 → 併入 Phase 4 反思 / Phase 5 實倉
 
 ### Phase 4：Reflection + 向量記憶（約 1.5–2 週）→「持續檢討、學習、優化」核心
 - ChromaDB 三個 collection：交易經驗 / 語意規則 / 被擋交易
