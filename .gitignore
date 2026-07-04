@@ -5,8 +5,8 @@ __pycache__/
 .env
 
 # 資料與日誌（不入版控）
-data/
-logs/
+/data/
+/logs/
 shioaji.log          # shioaji SDK 在專案根目錄自動寫的運行 log
 *.log
 
