@@ -90,14 +90,14 @@ export function StockBrowserModal({ onClose, onSelect }: {
         <div className="modal-body" style={{ display: "flex", gap: 12, padding: 12 }}>
           {/* 列表（未點選詳情時滿版，欄位含開高低收/漲跌幅） */}
           <div style={{ flex: showDetail ? "1 1 55%" : "1 1 100%", overflow: "auto", maxHeight: "62vh" }}>
-            <table className="grid">
+            <table className="grid" style={{ whiteSpace: "nowrap" }}>
               <thead><tr>
                 <th>代號</th><th>名稱</th>
                 <th style={{ textAlign: "right" }}>收盤</th>
                 <th style={{ textAlign: "right" }}>漲跌%</th>
-                <th style={{ textAlign: "right" }}>開</th>
-                <th style={{ textAlign: "right" }}>高</th>
-                <th style={{ textAlign: "right" }}>低</th>
+                {!showDetail && <th style={{ textAlign: "right" }}>開</th>}
+                {!showDetail && <th style={{ textAlign: "right" }}>高</th>}
+                {!showDetail && <th style={{ textAlign: "right" }}>低</th>}
                 {!showDetail && <th>市場</th>}
                 {!showDetail && <th>產業</th>}
                 <th>狀態</th>
@@ -112,9 +112,9 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     <td className={`mono ${r.change_pct != null ? cls(r.change_pct) : ""}`} style={{ textAlign: "right" }}>
                       {r.change_pct != null ? `${r.change_pct > 0 ? "+" : ""}${fmt(r.change_pct)}%` : "—"}
                     </td>
-                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.open != null ? fmt(r.open) : "—"}</td>
-                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.high != null ? fmt(r.high) : "—"}</td>
-                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.low != null ? fmt(r.low) : "—"}</td>
+                    {!showDetail && <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.open != null ? fmt(r.open) : "—"}</td>}
+                    {!showDetail && <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.high != null ? fmt(r.high) : "—"}</td>}
+                    {!showDetail && <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.low != null ? fmt(r.low) : "—"}</td>}
                     {!showDetail && <td style={{ fontSize: 11 }}>{r.market === "twse" ? "上市" : r.market === "tpex" ? "上櫃" : r.market}</td>}
                     {!showDetail && <td style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.industry}</td>}
                     <td>
