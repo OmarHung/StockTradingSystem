@@ -46,7 +46,7 @@ CryptoTrade 的架構是：多個 LLM 分析師各自產出報告 → 交易員 
 │  [1] Data Layer 資料層                                                    │
 │      price/volume（shioaji 主源、FinMind 指數+備援）                         │
 │      籌碼/除權息+預告/估值（TWSE/TPEx 官方主源）、月營收（MOPS 主源）            │
-│      → SQLite 本地資料庫，每日盤後增量更新（launchd 14:30）                    │
+│      → SQLite 本地資料庫，每日盤後增量更新（內建排程 14:30）                    │
 │                                                                          │
 │  [2] Screener 智慧選股（量化初篩 → LLM 精選）                                │
 │      量化漏斗：流動性/非處置股 → 動能、籌碼、營收多因子評分 → Top 30             │
@@ -94,7 +94,7 @@ CryptoTrade 的架構是：多個 LLM 分析師各自產出報告 → 交易員 
 | K 線圖產生 | mplfinance | 產生含均線/量/KD 的 PNG 供視覺分析 |
 | 回測 | 自建 TWEnv（仿 eth_env.py 的 gym 式介面） | 事件驅動日線回測，含台股成本模型 |
 | WebUI | Streamlit（多頁應用）+ Plotly | **Phase 1 就上線**，同時是「設定中心」與「監控儀表板」，每個階段長出對應頁面；設定表單直接讀寫 settings.yaml（含驗證），不用手改檔案 |
-| 排程 | macOS launchd / cron | 盤後 15:00 跑資料+決策，開盤前 08:30 掛單 |
+| 排程 | **後端內建排程器**（asyncio，src/scheduler.py；2026-07-05 取代 launchd） | 平日 14:30 資料 / 15:00 決策；WebUI ⚙️→⏰ 監控與調整；觸發走 jobs.py 子行程、API 重啟不中斷；晚啟動當天補跑 |
 | 通知 | Telegram / LINE Notify | 每日報告與成交回報推播 |
 
 ## 四、專案結構（目標）
@@ -134,7 +134,7 @@ StockTradingSystem/
 - [x] **資料層 P0/P1 完善**（參照 MT5/看盤軟體）：除權息還原價（backward adj，選股/分析師已切換）、
   查詢時清洗（零價列剔除+open夾取）、品質檢查器（TAIEX 日曆缺日偵測+OHLC 異常）、
   大盤指數 TAIEX/TPEx、週K/月K 即時聚合、處置股官方名單（select_universe 排除生效）
-- 📌 資料層後續：~~TWSE 官方源 fallback~~（已升主源）、~~盤後自動排程~~（launchd dataupdate 已掛）、
+- 📌 資料層後續：~~TWSE 官方源 fallback~~（已升主源）、~~盤後自動排程~~（內建排程器 dataupdate）、
   財報三表/借券/新聞、橫斷面索引、tick 級儲存（Parquet+DuckDB，Phase 5）
 - [x] 全市場回補完成（shioaji 股價 + 官方籌碼/除權息/估值，活股覆蓋接近 100%，
   顯示 <100% 部分為 stock_info 內含已下市股票的分母虛胖）
@@ -185,11 +185,11 @@ StockTradingSystem/
 ### Phase 5：模擬交易上線（約 2–4 週實跑）→ 對應需求 5、6 ✅ 機制完成（實跑驗證期進行中）
 - [x] PaperBroker 模擬帳本（真實價格撮合、隔日有效限價單、停損停利觸價、費稅損益、DB 持久化）
 - [x] 每日主流程 run_daily：撮合→風控出場→權益快照→週五反思→LLM決策→Guard（真實持倉）→掛單
-- [x] launchd 排程範本（平日 15:00）+ scripts/run_daily.py CLI + WebUI 一鍵執行
+- [x] 排程（平日 15:00；2026-07-05 起為後端內建排程器）+ scripts/run_daily.py CLI + WebUI 一鍵執行
 - [x] 績效報表：報酬/Sharpe/Sortino/MDD/勝率/盈虧比 + vs TAIEX alpha
 - [x] UI 💰 持倉績效面板（權益曲線 vs 大盤、持倉/成交、緊急停止、重置帳本）
 - ✅ 機制驗證：確定性週期分毫不差（掛單→成交→停損→-4,978 含費稅）；兩週循環實跑
-- ⏳ 驗收中：連續 4 週無人工介入自動運行（需 launchd 掛上後實際跑）
+- ⏳ 驗收中：連續 4 週無人工介入自動運行（內建排程器已就緒，需後端常駐實跑）
 - 📌 後續：日報推播（Telegram/LINE）、盤中即時停損（shioaji 串流）、五檔/下單面板
 
 ### Phase 6：實盤（小資金漸進）
@@ -224,7 +224,7 @@ StockTradingSystem/
 |---|---|---|
 | ~~月營收覆蓋僅 7%~~ | ✅ 已解（2026-07-04）：MOPS 官方月報升主源，7%→86% | 完成 |
 | ~~除權息覆蓋僅 17%~~ | ✅ 完全解決（2026-07-04）：挖出 TPEx 隱藏歷史端點 POST `bulletin/exDailyQ`（回溯 2008、日期區間），上櫃 2020 起 +6733 筆一次補齊，覆蓋 45%→79%（其餘為未配息公司＝自然上限）；FinMind 徹底退出除權息。附帶抓到真兇：先前「TPEx 連線被拒」= Python 3.13 預設 `VERIFY_X509_STRICT` 撞上 TPEx 憑證缺 SKI 擴展，已用放寬 strict 的 session 修復（TPEx 籌碼源同步復活）。加碼亦完成：估值指標（本益比/殖利率/股價淨值比）已接入——TWSE BWIBBU_d + TPEx peQryDate（歷史按日可查，valuation 表 + 逐日標記回補），基本面分析師（含 per_percentile_1y 歷史位階、cited_per 驗證）、股票瀏覽器、資料健康報告全串上 | 完成 |
-| **Phase 5 驗收：4 週無人工介入實跑** | 機制完成、launchd 範本就緒，尚未起跑 | 重置帳本 → 掛排程 → 開始計時 |
+| **Phase 5 驗收：4 週無人工介入實跑** | 機制完成、內建排程器就緒（⚙️→⏰ 可監控），尚未起跑 | 重置帳本 → 後端常駐 → 開始計時 |
 
 ### 🟡 中優先（規劃內未實作的功能）
 | 缺口 | 出處 | 說明 |

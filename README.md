@@ -16,7 +16,7 @@
    ↓      → 交易員 Agent(進場區間/停損/目標/R:R) ← 向量記憶注入(相似經驗+反思規則)
 風控 ──── Guard pipeline 九閘(處置股/熔斷/R:R≥1.5/冷卻/風險部位/單股/產業/現金)
    ↓      LLM 不可逾越；駁回寫 friction log
-執行 ──── PaperBroker 模擬帳本(隔日限價/停損停利/費稅損益) + 每日主流程 + launchd 排程
+執行 ──── PaperBroker 模擬帳本(隔日限價/停損停利/費稅損益) + 每日主流程 + 內建排程
    ↓
 學習 ──── 成果評估器(計畫 vs 後續真實價格) → ChromaDB 三集合(經驗/規則/被擋)
           → 週反思(LLM 歸納規則/反模式) → 注入下次決策  ⟲ 閉環
@@ -52,17 +52,17 @@ bash scripts/dev.sh
 | 🧠 大腦活動 / 📚 反思規則庫 | LLM 呼叫全紀錄+驗證攔截；規則/反模式管理、一鍵反思 |
 | 🗂 股票（TopBar） | 全市場瀏覽器：開高低收/漲跌幅列表、當月除權息標示、產業/市場/狀態篩選；點股票開整頁詳情（總覽/籌碼/基本面/除權息/資料覆蓋 分頁＋走勢/法人/融資/營收/PER 圖表） |
 | 📦 資料（TopBar） | 健康報告(覆蓋率/新鮮度/建議)、分類型回補（股價/法人/融資券/月營收/除權息/估值）+逐日進度、品質檢查 |
-| ⚙️ 設定（TopBar） | 資金/風險/因子權重/LLM模型/金鑰/券商模擬↔正式切換 |
+| ⚙️ 設定（TopBar） | 資金/風險/因子權重/LLM模型/⏰排程監控與調整/金鑰/券商模擬↔正式切換 |
 
 （`webui/` 內有早期 Streamlit 版，功能已被 React 終端全面取代，僅留參考。）
 
-## 無人值守排程（macOS launchd）
+## 無人值守排程（後端內建，⚙️ 設定 → ⏰ 排程）
 
-```bash
-cp scripts/com.stocktrading.*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.stocktrading.dataupdate.plist  # 平日14:30 資料增量更新
-launchctl load ~/Library/LaunchAgents/com.stocktrading.daily.plist       # 平日15:00 交易主流程
-```
+排程器住在 FastAPI 行程內（asyncio 迴圈），毋須 launchd/cron：
+- **資料增量更新** 平日 14:30、**每日交易主流程** 平日 15:00（時間/啟停皆可在 WebUI 調整，立即生效）
+- 實際工作走獨立子行程（src/jobs.py）——API 重啟不中斷進行中任務；API 晚於排定時間啟動會當天自動補跑
+- WebUI 可監控：執行中狀態、上次/下次執行、log 尾巴、▶ 立即執行
+- ⚠️ 前提：`bash scripts/dev.sh`（或後端 uvicorn）需常駐執行
 
 每日流程：開盤撮合昨日委託 → 停損停利 → 權益快照 → (週五)反思 → LLM 決策 → Guard → 掛明日單。
 緊急停止後只做保護性出場、不開新倉。
@@ -91,7 +91,7 @@ src/
   pipeline/daily.py    每日主流程
   backtest/ env/       回測引擎（TWEnv、台股成本模型）
   report/              績效統計
-scripts/               CLI + launchd 排程範本
+scripts/               CLI 腳本（backfill/run_daily/run_backtest）
 config/settings.yaml   全部參數（WebUI 設定頁讀寫，金鑰在 .env）
 ```
 

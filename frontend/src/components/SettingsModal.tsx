@@ -1,14 +1,91 @@
 import { useEffect, useState } from "react";
 import { api, type ModelInfo } from "../api";
 
-type Tab = "capital" | "risk" | "screener" | "llm" | "keys";
+type Tab = "capital" | "risk" | "screener" | "llm" | "sched" | "keys";
 const TABS: { id: Tab; label: string }[] = [
   { id: "capital", label: "💰 資金" },
   { id: "risk", label: "🛡️ 風險" },
   { id: "screener", label: "🔍 選股" },
   { id: "llm", label: "🤖 LLM" },
+  { id: "sched", label: "⏰ 排程" },
   { id: "keys", label: "🔑 API 金鑰" },
 ];
+
+/** 內建排程監控與調整（後端 asyncio 排程器，已取代 launchd）。 */
+function SchedulerTab() {
+  const [rows, setRows] = useState<Record<string, any>[]>([]);
+  const [edit, setEdit] = useState<Record<string, { enabled: boolean; time: string }>>({});
+  const [msg, setMsg] = useState("");
+
+  const refresh = () => api.schedulerStatus().then((r) => {
+    setRows(r);
+    setEdit((e) => {
+      const next = { ...e };
+      for (const j of r) if (!(j.name in next)) next[j.name] = { enabled: j.enabled, time: j.time };
+      return next;
+    });
+  }).catch(() => {});
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 10_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(""), 2500); };
+  const save = async (name: string) => {
+    try { await api.schedulerConfig(name, edit[name].enabled, edit[name].time); flash("已儲存，立即生效 ✓"); refresh(); }
+    catch (e) { alert(String(e)); }
+  };
+  const runNow = async (name: string) => {
+    try { await api.schedulerRun(name); flash("已觸發 ▶"); setTimeout(refresh, 800); }
+    catch (e) { alert(String(e)); }
+  };
+
+  return (
+    <div>
+      {rows.map((j) => (
+        <div key={j.name} style={{ background: "#0d1119", borderRadius: 6, padding: 12, marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <b style={{ fontSize: 13 }}>{j.label}</b>
+            {j.running
+              ? <span className="tag" style={{ background: "rgba(41,98,255,0.2)", color: "#8ab4ff" }}>🟢 執行中</span>
+              : <span className="tag" style={{ background: "#2a3040", color: "var(--text-dim)" }}>閒置</span>}
+            <div style={{ flex: 1 }} />
+            <button className="btn" style={{ fontSize: 11 }} disabled={j.running}
+              onClick={() => runNow(j.name)}>▶ 立即執行</button>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6, fontSize: 12 }}>
+            <label style={{ display: "flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={edit[j.name]?.enabled ?? j.enabled}
+                onChange={(e) => setEdit((x) => ({ ...x, [j.name]: { ...x[j.name], enabled: e.target.checked } }))} />
+              啟用（平日）
+            </label>
+            <input type="time" value={edit[j.name]?.time ?? j.time}
+              onChange={(e) => setEdit((x) => ({ ...x, [j.name]: { ...x[j.name], time: e.target.value } }))}
+              style={{ width: 110 }} />
+            <button className="btn primary" style={{ fontSize: 11 }} onClick={() => save(j.name)}>儲存</button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", display: "flex", gap: 16 }}>
+            <span>上次：{j.last_run ? `${j.last_run.started_at?.replace("T", " ")}（${j.last_run.source === "manual" ? "手動" : "排程"}）` : "從未執行"}</span>
+            <span>下次：{j.next_run ? j.next_run.replace("T", " ") : "—（停用）"}</span>
+          </div>
+          {j.log_tail && (
+            <pre style={{ fontSize: 10, color: "var(--text-dim)", background: "#0a0d14", borderRadius: 4,
+              padding: 6, marginTop: 6, marginBottom: 0, whiteSpace: "pre-wrap", maxHeight: 60, overflow: "auto" }}>
+              {j.log_tail}
+            </pre>
+          )}
+        </div>
+      ))}
+      <div className="form-hint">
+        排程器住在後端 API 行程內（asyncio），實際工作透過獨立子行程執行——API 重啟不會中斷進行中的任務。
+        若 API 在排定時間之後才啟動，當天會自動補跑一次。週六日不執行。
+      </div>
+      {msg && <span className="save-ok">{msg}</span>}
+    </div>
+  );
+}
 
 /** 設定面板：表單化讀寫 settings.yaml 各區塊 + .env 金鑰。 */
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -90,6 +167,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </>)}
 
+          {tab === "sched" && <SchedulerTab />}
+
           {tab === "keys" && (<>
             <KeysTab env={env} onSaved={(k) => { flash("金鑰已寫入 .env ✓"); api.envStatus().then(setEnv); void k; }} />
 
@@ -127,7 +206,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-foot">
           {saved && <span className="save-ok">{saved}</span>}
-          {tab !== "keys" && <button className="btn primary" onClick={() => saveSection(tab)}>儲存此頁</button>}
+          {tab !== "keys" && tab !== "sched" && <button className="btn primary" onClick={() => saveSection(tab)}>儲存此頁</button>}
           <button className="btn" onClick={onClose}>關閉</button>
         </div>
       </div>

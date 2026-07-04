@@ -61,3 +61,12 @@ llm:
 logging:
   level: INFO
   dir: logs
+
+# ---- 後端內建排程（取代 launchd；WebUI 設定頁可調）----
+scheduler:
+  dataupdate:
+    enabled: true
+    time: "14:30"                  # 平日盤後資料增量更新（HH:MM，24h制）
+  daily:
+    enabled: true
+    time: "15:00"                  # 平日交易主流程（撮合→風控→決策→掛單）

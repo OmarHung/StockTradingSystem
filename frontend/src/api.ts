@@ -78,6 +78,10 @@ export const api = {
   stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
   stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),
   stockSeries: (id: string) => get<Record<string, any>>(`/stocks/${id}/series`),
+  schedulerStatus: () => get<Record<string, any>[]>("/scheduler/status"),
+  schedulerConfig: (name: string, enabled: boolean, time: string) =>
+    post<{ saved: boolean }>("/scheduler/config", { name, enabled, time }),
+  schedulerRun: (name: string) => post<{ started: boolean }>(`/scheduler/run/${name}`, {}),
   qualityCheck: () => get<Record<string, any>>("/quality-check"),
   scanner: (kind: string, count = 20) =>
     get<Record<string, any>[]>(`/scanner?kind=${kind}&count=${count}`),

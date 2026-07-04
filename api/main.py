@@ -38,6 +38,14 @@ app = FastAPI(title="StockTradingSystem API", version="0.1.0")
 # 確保資料表齊全（新增資料集後，API 先於回補啟動也不會查表失敗）
 db.init_db(get_settings().db_path)
 
+
+@app.on_event("startup")
+async def _start_scheduler():
+    """後端內建排程器（取代 launchd）：asyncio 常駐迴圈，觸發走 jobs.py 子行程。"""
+    import asyncio
+    from src import scheduler
+    asyncio.create_task(scheduler.run_loop())
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -330,6 +338,48 @@ def daily_run(req: DailyRunReq):
 def daily_status():
     return {"running": jobs.is_running(_DAILY_JOB),
             "log": jobs.read_log(_DAILY_JOB, tail=25)}
+
+
+# ---------- 內建排程器（監控/調整/手動觸發）----------
+class SchedulerConfigReq(BaseModel):
+    name: str          # dataupdate / daily
+    enabled: bool
+    time: str          # "HH:MM"
+
+
+@app.get("/api/scheduler/status")
+def scheduler_status():
+    from src import scheduler
+    return scheduler.status()
+
+
+@app.post("/api/scheduler/config")
+def scheduler_config(req: SchedulerConfigReq):
+    from src import scheduler
+    if req.name not in scheduler.JOB_DEFS:
+        raise HTTPException(400, f"未知排程：{req.name}")
+    try:
+        hh, mm = req.time.split(":")
+        assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
+    except (ValueError, AssertionError):
+        raise HTTPException(400, "時間格式須為 HH:MM（24 小時制）")
+    raw = config_io.load_raw()
+    raw.setdefault("scheduler", {}).setdefault(req.name, {})
+    raw["scheduler"][req.name]["enabled"] = req.enabled
+    raw["scheduler"][req.name]["time"] = req.time
+    config_io.save_raw(raw)
+    return {"saved": True}
+
+
+@app.post("/api/scheduler/run/{name}")
+def scheduler_run_now(name: str):
+    from src import scheduler
+    if name not in scheduler.JOB_DEFS:
+        raise HTTPException(400, f"未知排程：{name}")
+    started = scheduler.trigger(name, source="manual")
+    if not started:
+        raise HTTPException(409, "該任務已在執行中")
+    return {"started": True}
 
 
 # ---------- Phase 4：反思與向量記憶 ----------
