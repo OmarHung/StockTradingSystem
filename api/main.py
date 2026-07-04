@@ -222,6 +222,17 @@ def brain_log(limit: int = 100):
     return _records(q.brain_log(limit=limit))
 
 
+@app.get("/api/friction")
+def friction(limit: int = 100):
+    """Guard pipeline 駁回紀錄（供檢討風控鬆緊）。"""
+    from src.data import database as _db
+    with _db.connect(get_settings().db_path) as conn:
+        df = _db.read_sql(
+            conn, "SELECT id, ts, as_of, stock_id, gate, reason FROM friction_log "
+                  "ORDER BY id DESC LIMIT ?", (limit,))
+    return _records(df)
+
+
 # ---------- 設定 ----------
 @app.get("/api/config")
 def get_config():

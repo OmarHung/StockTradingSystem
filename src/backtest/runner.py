@@ -4,7 +4,12 @@ from __future__ import annotations
 import pandas as pd
 
 from src.backtest import metrics
-from src.backtest.strategies import BuyAndHold, MACrossover, ScreenerStrategy
+from src.backtest.strategies import (
+    BuyAndHold,
+    MACrossover,
+    RiskManagedScreener,
+    ScreenerStrategy,
+)
 from src.config import get_settings
 from src.data import query as q
 from src.env.costs import CostModel
@@ -69,14 +74,20 @@ def run_backtest(
         base = "0050" if "0050" in universe or "0050" in q.all_stock_ids() else universe[0]
         prices = load_prices([base], start, end)
         strat = BuyAndHold(base) if strategy_name == "buy_and_hold" else MACrossover(base)
-    elif strategy_name == "screener":
-        prices = load_prices(universe, start, end)
+    elif strategy_name in ("screener", "screener_risk"):
+        # TAIEX 一併載入（風控策略的大盤濾網用；不在選股池內）
+        prices = load_prices(universe + ["TAIEX"], start, end)
         # 以月為調倉頻率
         all_days = sorted({d for df in prices.values() for d in df["date"]})
         rebal = [d for d in _month_starts(all_days) if start <= d <= end]
         log.info("Screener 回測：%d 個月調倉日", len(rebal))
         signals = generate_screener_signals(universe, rebal, cfg)
-        strat = ScreenerStrategy(signals, max_positions=max_positions)
+        if strategy_name == "screener_risk":
+            from src.risk.guard import RiskConfig
+            strat = RiskManagedScreener(signals, RiskConfig.from_settings(cfg),
+                                        max_positions=max_positions)
+        else:
+            strat = ScreenerStrategy(signals, max_positions=max_positions)
     else:
         raise ValueError(f"未知策略：{strategy_name}")
 

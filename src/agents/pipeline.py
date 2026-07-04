@@ -59,8 +59,62 @@ def analyze_stock(stock_id: str, as_of: str) -> dict | None:
         "plan": plan.model_dump(),
         "analysts": bundle,
     }
+
+    # 5) Guard pipeline：buy 計畫必須通過硬性風控閘門才核准部位（LLM 不可逾越）
+    record["guard"] = _run_guard(stock_id, as_of, plan)
+
     _save_plan(record)
     return record
+
+
+def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
+    """對 buy 計畫跑 Guard pipeline；駁回寫 friction_log。非 buy 回 None。"""
+    if plan.action != "buy":
+        return None
+    from src.data import fetchers, query as q
+    from src.risk import guard as G
+
+    cfg = get_settings()
+    rcfg = G.RiskConfig.from_settings(cfg)
+
+    # 產業別（供曝險閘；Phase 5 前組合為空，此欄僅記錄）
+    info = q.list_stocks()
+    row = info[info["stock_id"] == stock_id]
+    industry = row.iloc[0]["industry_category"] if not row.empty else ""
+
+    entry_mid = None
+    if plan.entry_low and plan.entry_high:
+        entry_mid = (plan.entry_low + plan.entry_high) / 2
+    cand = G.TradeCandidate(
+        stock_id=stock_id,
+        entry=entry_mid or 0.0,
+        stop_loss=plan.stop_loss or 0.0,
+        target=plan.target_price,
+        industry=industry,
+    )
+    # 組合狀態：Phase 5 接上實際持倉前，用空倉 + 設定資金
+    port = G.PortfolioState.empty(float(cfg["capital"]["total"]))
+    with db.connect(cfg.db_path) as conn:
+        disp = fetchers.current_disposition_ids(conn, as_of)
+        res = G.evaluate(cand, port, rcfg, disposition_ids=disp, as_of=as_of)
+        if not res.approved:
+            conn.execute(
+                "INSERT INTO friction_log (ts, as_of, stock_id, gate, reason, plan_json) "
+                "VALUES (?,?,?,?,?,?)",
+                (dt.datetime.now().isoformat(timespec="seconds"), as_of, stock_id,
+                 res.reject_gate or "", res.reject_reason or "",
+                 json.dumps(plan.model_dump(), ensure_ascii=False)),
+            )
+            log.info("Guard 駁回 %s：[%s] %s", stock_id, res.reject_gate, res.reject_reason)
+        else:
+            log.info("Guard 核准 %s：%d 股（投入 %s、風險 %s）",
+                     stock_id, res.shares, f"{res.est_cost:,.0f}", f"{res.risk_amount:,.0f}")
+    return {
+        "approved": res.approved, "shares": res.shares,
+        "est_cost": res.est_cost, "risk_amount": res.risk_amount,
+        "reject_gate": res.reject_gate, "reject_reason": res.reject_reason,
+        "checks": res.checks,
+    }
 
 
 def analyze_stocks(stock_ids: list[str], as_of: str) -> list[dict]:

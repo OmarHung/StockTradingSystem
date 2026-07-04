@@ -136,6 +136,18 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (as_of, stock_id)
         )
     """,
+    # Friction log：被 Guard pipeline 駁回/縮減的交易紀錄（供反思層檢討風控鬆緊）
+    "friction_log": """
+        CREATE TABLE IF NOT EXISTS friction_log (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts        TEXT NOT NULL,
+            as_of     TEXT,
+            stock_id  TEXT NOT NULL,
+            gate      TEXT NOT NULL,      -- 駁回的閘門（reward_risk / cooldown / ...）
+            reason    TEXT,
+            plan_json TEXT               -- 當時的交易計畫快照（含進出場價）
+        )
+    """,
     # 選股結果快照：每個基準日保留一份完整初篩結果（供 WebUI 重整/重啟後還原）。
     "screener_result": """
         CREATE TABLE IF NOT EXISTS screener_result (

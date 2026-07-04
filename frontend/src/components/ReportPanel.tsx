@@ -63,6 +63,22 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                   進 {fmt(p.entry_low)}~{fmt(p.entry_high)} · 損 {fmt(p.stop_loss)} · 標 {fmt(p.target_price)} · R:R {fmt(p.reward_risk)}
                 </span>
               </div>
+              {rec.guard && (
+                <div style={{
+                  marginTop: 6, padding: "5px 8px", borderRadius: 4, fontSize: 11,
+                  background: rec.guard.approved ? "rgba(14,203,129,0.08)" : "rgba(240,185,11,0.08)",
+                  borderLeft: `2px solid ${rec.guard.approved ? "var(--down)" : "var(--warning)"}`,
+                }}>
+                  {rec.guard.approved ? (
+                    <>🛡️ <b>風控核准</b>：買進 <b className="mono">{rec.guard.shares.toLocaleString()}</b> 股
+                      · 投入 <span className="mono">{Number(rec.guard.est_cost).toLocaleString()}</span> 元
+                      · 最大風險 <span className="mono">{Number(rec.guard.risk_amount).toLocaleString()}</span> 元</>
+                  ) : (
+                    <>🛡️ <b style={{ color: "var(--warning)" }}>風控駁回</b>
+                      ［{rec.guard.reject_gate}］{rec.guard.reject_reason}</>
+                  )}
+                </div>
+              )}
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>{p.rationale}</div>
               <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {Object.entries(rec.analysts ?? {}).map(([k, e]: [string, any]) => (

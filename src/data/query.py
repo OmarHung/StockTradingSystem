@@ -285,8 +285,13 @@ def get_revenue_bulk(stock_ids: list[str], as_of: str) -> pd.DataFrame:
 
 
 def all_stock_ids() -> list[str]:
+    """已有價格資料的個股清單（排除大盤指數，避免混入選股池）。"""
     with db.connect(_db_path()) as conn:
-        df = db.read_sql(conn, "SELECT DISTINCT stock_id FROM price_daily ORDER BY stock_id")
+        df = db.read_sql(
+            conn,
+            "SELECT DISTINCT stock_id FROM price_daily "
+            "WHERE stock_id NOT IN ('TAIEX','TPEx') ORDER BY stock_id",
+        )
     return df["stock_id"].tolist()
 
 
