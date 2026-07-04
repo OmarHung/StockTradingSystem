@@ -131,6 +131,11 @@ StockTradingSystem/
 - [x] `scripts/backfill.py` 增量 + 冪等回補；`scripts/init_db.py`；查詢 API `src/data/query.py`
 - [x] 單元測試 3 passed；3 檔冒煙測試通過（日K/法人/融資券/月營收皆入庫可查）
 - ✅ 驗收通過：可查任一股票歷史；重跑只補新資料不重抓
+- [x] **資料層 P0/P1 完善**（參照 MT5/看盤軟體）：除權息還原價（backward adj，選股/分析師已切換）、
+  查詢時清洗（零價列剔除+open夾取）、品質檢查器（TAIEX 日曆缺日偵測+OHLC 異常）、
+  大盤指數 TAIEX/TPEx、週K/月K 即時聚合、處置股官方名單（select_universe 排除生效）
+- 📌 資料層後續（P2/P3 已規劃未做）：TWSE 官方源 fallback、盤後自動排程+新鮮度警示、
+  財報三表/借券/新聞、橫斷面索引、tick 級儲存（Parquet+DuckDB，Phase 5）
 - ⏳ 待辦：執行全市場 5 年完整回補（約需 1 小時、視 API 額度）
 
 ### Phase 1：量化選股 + 回測環境 + WebUI v1（約 2 週）✅ 已完成
