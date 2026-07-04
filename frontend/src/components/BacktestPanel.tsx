@@ -70,9 +70,31 @@ export function BacktestPanel() {
           ))}
         </div>
       )}
-      <div ref={ref} style={{ width: "100%", height: res ? "calc(100% - 60px)" : "100%", minHeight: 120 }}>
+      <div ref={ref} style={{ width: "100%", height: res ? 200 : "100%", minHeight: 120 }}>
         {!res && !loading && <div className="empty-hint">選策略後按「回測」</div>}
       </div>
+      {res && res.trades.length > 0 && (
+        <details style={{ padding: 8 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-dim)" }}>
+            逐筆成交明細（{res.trades.length} 筆）
+          </summary>
+          <table className="grid" style={{ marginTop: 6 }}>
+            <thead><tr><th>日期</th><th>代碼</th><th>方向</th><th>股數</th><th>價格</th><th>金額</th></tr></thead>
+            <tbody>
+              {res.trades.slice(0, 200).map((t, i) => (
+                <tr key={i}>
+                  <td style={{ fontSize: 11 }}>{String(t.date)}</td>
+                  <td>{String(t.stock_id)}</td>
+                  <td className={t.side === "BUY" ? "up" : "down"}>{t.side === "BUY" ? "買" : "賣"}</td>
+                  <td className="mono">{Number(t.shares).toLocaleString()}</td>
+                  <td className="mono">{fmt(Number(t.price))}</td>
+                  <td className="mono">{Number(t.amount).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </Panel>
   );
 }

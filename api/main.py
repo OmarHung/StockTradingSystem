@@ -22,9 +22,11 @@ if not (os.getenv("ANTHROPIC_AUTH_TOKEN") or "").strip():
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 from src import config_io  # noqa: E402
-from src import indicators as ind  # noqa: E402
+from src import jobs  # noqa: E402
 from src.agents import pipeline  # noqa: E402
 from src.backtest.runner import run_backtest  # noqa: E402
+from src.config import get_settings  # noqa: E402
+from src.data import database as db  # noqa: E402
 from src.data import query as q  # noqa: E402
 from src.llm import client as llm  # noqa: E402
 from src.screener.screener import run_screener  # noqa: E402
@@ -205,3 +207,46 @@ def set_env(req: EnvUpdate):
         raise HTTPException(400, "值不可為空")
     config_io.set_env_var(req.key, req.value.strip())
     return {"status": "saved"}
+
+
+# ---------- 資料管理（初始化 / 背景回補）----------
+_BACKFILL_JOB = "backfill"
+
+
+@app.post("/api/init-db")
+def init_db():
+    db.init_db(get_settings().db_path)
+    return {"status": "ok", "tables": list(db.SCHEMA.keys())}
+
+
+class BackfillReq(BaseModel):
+    mode: str = "limit"          # all | stocks | limit
+    start: str = "2020-01-01"
+    stocks: str | None = None    # 空格分隔
+    limit: int | None = 50
+    force: bool = False
+
+
+@app.post("/api/backfill/start")
+def backfill_start(req: BackfillReq):
+    if jobs.is_running(_BACKFILL_JOB):
+        raise HTTPException(409, "回補已在執行中")
+    args = ["scripts.backfill", "--start", req.start]
+    if req.mode == "stocks" and req.stocks and req.stocks.strip():
+        args += ["--stocks", *req.stocks.split()]
+    elif req.mode == "limit" and req.limit:
+        args += ["--limit", str(int(req.limit))]
+    if req.force:
+        args += ["--force"]
+    started = jobs.start_job(_BACKFILL_JOB, args)
+    return {"started": started, "running": jobs.is_running(_BACKFILL_JOB), "cmd": " ".join(args)}
+
+
+@app.get("/api/backfill/status")
+def backfill_status():
+    return {"running": jobs.is_running(_BACKFILL_JOB), "log": jobs.read_log(_BACKFILL_JOB, tail=25)}
+
+
+@app.post("/api/backfill/stop")
+def backfill_stop():
+    return {"stopped": jobs.stop_job(_BACKFILL_JOB)}

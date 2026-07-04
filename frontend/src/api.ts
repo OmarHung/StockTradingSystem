@@ -61,4 +61,10 @@ export const api = {
     put<{ status: string }>("/config", { section, values }),
   envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean }>("/env-status"),
   setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
+  // 資料管理
+  initDb: () => post<{ status: string; tables: string[] }>("/init-db", {}),
+  backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean }) =>
+    post<{ started: boolean; running: boolean; cmd: string }>("/backfill/start", body),
+  backfillStatus: () => get<{ running: boolean; log: string }>("/backfill/status"),
+  backfillStop: () => post<{ stopped: boolean }>("/backfill/stop", {}),
 };

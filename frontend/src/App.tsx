@@ -11,6 +11,8 @@ import { KChart } from "./components/KChart";
 import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
+import { DataPanel } from "./components/DataPanel";
+import { BrainPanel } from "./components/BrainPanel";
 import { SettingsModal } from "./components/SettingsModal";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
@@ -20,6 +22,8 @@ const LAYOUT: Layout = [
   { i: "screener", x: 8, y: 0, w: 4, h: 7 },
   { i: "report", x: 2, y: 7, w: 6, h: 5 },
   { i: "backtest", x: 8, y: 7, w: 4, h: 5 },
+  { i: "data", x: 0, y: 12, w: 6, h: 6 },
+  { i: "brain", x: 6, y: 12, w: 6, h: 6 },
 ];
 
 export default function App() {
@@ -51,6 +55,8 @@ export default function App() {
           <div key="screener"><ScreenerPanel onSelect={setSelected} /></div>
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
           <div key="backtest"><BacktestPanel /></div>
+          <div key="data"><DataPanel /></div>
+          <div key="brain"><BrainPanel /></div>
         </GridLayout>
       </div>
     </div>
