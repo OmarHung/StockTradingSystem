@@ -10,7 +10,7 @@ import { Watchlist } from "./components/Watchlist";
 import { KChart } from "./components/KChart";
 import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
-import { BacktestPanel } from "./components/BacktestPanel";
+import { BacktestPanel, BacktestModal } from "./components/BacktestPanel";
 import { BrainPanel } from "./components/BrainPanel";
 import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
@@ -41,6 +41,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showData, setShowData] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [showBacktest, setShowBacktest] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
 
   const { width, containerRef } = useContainerWidth();
@@ -64,8 +65,10 @@ export default function App() {
       <TopBar hasKey={hasKey} brokerEnv={brokerEnv}
         onOpenSettings={() => setShowSettings(true)}
         onOpenData={() => setShowData(true)}
-        onOpenBrowser={() => setShowBrowser(true)} />
+        onOpenBrowser={() => setShowBrowser(true)}
+        onOpenBacktest={() => setShowBacktest(true)} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
+      {showBacktest && <BacktestModal onClose={() => setShowBacktest(false)} />}
       {showData && <DataModal onClose={() => setShowData(false)} />}
       {showBrowser && <StockBrowserModal onClose={() => setShowBrowser(false)} onSelect={setSelected} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>

@@ -10,8 +10,8 @@ const STRATS = [
   { v: "ma_cross", label: "0050均線" },
 ];
 
-/** 回測面板：跑策略回測（區間/資金/持倉數可調），畫權益曲線 + 顯示績效指標。 */
-export function BacktestPanel() {
+/** 回測核心（工具列+指標+權益曲線+逐筆明細）；面板與獨立視窗共用。 */
+function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
   const [strategy, setStrategy] = useState("screener");
   const twoYearsAgo = () => {
     const d = new Date(); d.setFullYear(d.getFullYear() - 2);
@@ -52,18 +52,13 @@ export function BacktestPanel() {
 
   const m = res?.metrics;
   return (
-    <Panel title="策略回測" icon="🧪"
-      right={
-        <div style={{ display: "flex", gap: 6 }}>
-          <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-            {STRATS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
-          </select>
-          <button className="btn primary" onClick={run} disabled={loading}>回測</button>
-        </div>
-      }>
-      {/* 參數工具列（放面板內第一行，避免擠爆標題列） */}
+    <>
+      {/* 參數工具列 */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 8px",
         borderBottom: "1px solid var(--border)", flexWrap: "wrap", fontSize: 11 }}>
+        <select value={strategy} onChange={(e) => setStrategy(e.target.value)} style={{ fontSize: 11 }}>
+          {STRATS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+        </select>
         <span style={{ color: "var(--text-dim)" }}>區間</span>
         <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
           style={{ width: 118, fontSize: 11 }} />
@@ -78,6 +73,7 @@ export function BacktestPanel() {
         <input type="number" value={maxPos} min={1} max={30}
           onChange={(e) => setMaxPos(Number(e.target.value))}
           style={{ width: 46, fontSize: 11 }} />
+        <button className="btn primary" onClick={run} disabled={loading}>回測</button>
       </div>
       {loading && <div className="spinner">回測中…</div>}
       {m && (
@@ -95,8 +91,8 @@ export function BacktestPanel() {
           ))}
         </div>
       )}
-      <div ref={ref} style={{ width: "100%", height: res ? 200 : "100%", minHeight: 120 }}>
-        {!res && !loading && <div className="empty-hint">選策略後按「回測」</div>}
+      <div ref={ref} style={{ width: "100%", height: res ? chartHeight : "100%", minHeight: 120 }}>
+        {!res && !loading && <div className="empty-hint">設定參數後按「回測」</div>}
       </div>
       {res && res.trades.length > 0 && (
         <details style={{ padding: 8 }}>
@@ -120,6 +116,32 @@ export function BacktestPanel() {
           </table>
         </details>
       )}
+    </>
+  );
+}
+
+/** 主畫面 grid 面板版。 */
+export function BacktestPanel() {
+  return (
+    <Panel title="策略回測" icon="🧪">
+      <BacktestCore chartHeight={200} />
     </Panel>
+  );
+}
+
+/** 獨立視窗版（TopBar 🧪 回測）：更大的圖與明細空間。 */
+export function BacktestModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 960, maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span>🧪 策略回測</span>
+          <span className="close" onClick={onClose}>✕</span>
+        </div>
+        <div className="modal-body" style={{ padding: 0, overflow: "auto", maxHeight: "80vh" }}>
+          <BacktestCore chartHeight={340} />
+        </div>
+      </div>
+    </div>
   );
 }
