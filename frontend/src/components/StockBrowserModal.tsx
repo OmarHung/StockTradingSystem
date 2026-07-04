@@ -61,6 +61,7 @@ const TABS = [
   { key: "overview", label: "總覽" },
   { key: "chips", label: "籌碼" },
   { key: "fund", label: "基本面" },
+  { key: "dividend", label: "除權息" },
   { key: "coverage", label: "資料覆蓋" },
 ];
 
@@ -319,6 +320,51 @@ export function StockBrowserModal({ onClose, onSelect }: {
                         <span style={{ color: "#f0b90b" }}>
                           {f.next_ex_date}{f.next_ex_cash_dividend != null ? `　${fmt(f.next_ex_cash_dividend, 2)} 元` : ""}
                         </span>} />
+                    )}
+                  </div>
+                )}
+
+                {tab === "dividend" && (
+                  <div>
+                    {(d.dividend_forecasts ?? []).length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, padding: "4px 2px" }}>⏰ 預告（未來日程）</div>
+                        {(d.dividend_forecasts as any[]).map((fcr, i) => (
+                          <Item key={i} label={`${fcr.date}　除${fcr.kind ?? "權息"}`} value={
+                            <span style={{ color: "#f0b90b" }}>
+                              {fcr.cash_dividend != null && fcr.cash_dividend > 0 ? `現金 ${fmt(fcr.cash_dividend, 2)} 元` : ""}
+                              {fcr.stock_ratio != null && fcr.stock_ratio > 0 ? `　配股率 ${fmt(fcr.stock_ratio, 4)}` : ""}
+                              {(!fcr.cash_dividend && !fcr.stock_ratio) ? "—" : ""}
+                            </span>} />
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ fontWeight: 600, fontSize: 12, padding: "4px 2px" }}>📜 歷史除權息（{(d.dividends ?? []).length} 次）</div>
+                    {(d.dividends ?? []).length === 0 && <div className="empty-hint">此商品無除權息紀錄</div>}
+                    {(d.dividends ?? []).length > 0 && (
+                      <table className="grid" style={{ whiteSpace: "nowrap" }}>
+                        <thead><tr>
+                          <th>除權息日</th><th>類別</th>
+                          <th style={{ textAlign: "right" }}>配發(權值+息值)</th>
+                          <th style={{ textAlign: "right" }}>前收盤</th>
+                          <th style={{ textAlign: "right" }}>參考價</th>
+                          <th style={{ textAlign: "right" }}>調整幅度</th>
+                        </tr></thead>
+                        <tbody>
+                          {(d.dividends as any[]).map((dv, i) => (
+                            <tr key={i}>
+                              <td className="mono">{dv.date}</td>
+                              <td>{dv.kind || "—"}</td>
+                              <td className="mono" style={{ textAlign: "right" }}>{dv.dividend != null ? fmt(dv.dividend, 2) : "—"}</td>
+                              <td className="mono" style={{ textAlign: "right" }}>{fmt(dv.before_price, 2)}</td>
+                              <td className="mono" style={{ textAlign: "right" }}>{fmt(dv.after_price, 2)}</td>
+                              <td className="mono down" style={{ textAlign: "right" }}>
+                                {dv.before_price ? `-${fmt((1 - dv.after_price / dv.before_price) * 100, 2)}%` : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     )}
                   </div>
                 )}

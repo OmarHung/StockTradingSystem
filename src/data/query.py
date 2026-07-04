@@ -430,6 +430,15 @@ def stock_detail(stock_id: str) -> dict:
         m = db.read_sql(conn, "SELECT date, margin_purchase_balance, short_sale_balance "
                               "FROM margin WHERE stock_id=? ORDER BY date DESC LIMIT 1", (stock_id,))
         detail["margin"] = m.to_dict(orient="records")[0] if not m.empty else None
+        # 除權息：歷史（新到舊）+ 未來預告
+        dv = db.read_sql(conn, "SELECT date, kind, dividend, before_price, after_price "
+                               "FROM dividend WHERE stock_id=? ORDER BY date DESC", (stock_id,))
+        detail["dividends"] = dv.to_dict(orient="records")
+        import datetime as _dt
+        fc = db.read_sql(conn, "SELECT date, kind, cash_dividend, stock_ratio "
+                               "FROM dividend_forecast WHERE stock_id=? AND date>=? ORDER BY date",
+                         (stock_id, _dt.date.today().isoformat()))
+        detail["dividend_forecasts"] = fc.to_dict(orient="records")
     return detail
 
 
