@@ -24,6 +24,7 @@ from src.config import get_settings
 from src.data import database as db
 from src.data import fetchers
 from src.data import shioaji_source
+from src.data import twse_source
 from src.data.finmind_client import FinMindClient, FinMindQuotaExhausted
 from src.logging_setup import get_logger, setup_logging
 
@@ -147,6 +148,30 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
             log.info("股價日K 主源＝shioaji（FinMind 額度保留給籌碼/基本面資料）")
             _shioaji_price_backfill(conn, targets, default_start, end, force=force)
 
+        # 籌碼主源：TWSE/TPEx 官方（按交易日全市場，免額度）；除權息主源：TWT49U
+        # 官方覆蓋完成的市場，FinMind 對應 dataset 自動跳過（降級為備援）
+        official_skip: dict[str, set[str]] = {}   # dataset -> 要跳過的市場集合
+        if {"institutional", "margin"} & set(active):
+            covered = _official_chips_backfill(conn, default_start, end, force=force)
+            for mkt, ok in covered.items():
+                if ok:
+                    official_skip.setdefault("institutional", set()).add(mkt)
+                    official_skip.setdefault("margin", set()).add(mkt)
+            if covered.get("twse") or covered.get("tpex"):
+                log.info("法人/融資券官方源覆蓋完成：%s（FinMind 對應市場跳過）",
+                         "、".join(m for m, ok in covered.items() if ok))
+        if "dividend" in active:
+            try:
+                n = _official_dividend_backfill(conn, default_start, end)
+                if n > 0:
+                    official_skip.setdefault("dividend", set()).add("twse")
+                    log.info("除權息官方源（TWT49U）補入 %d 筆（上市檔 FinMind 跳過）", n)
+            except Exception as e:  # noqa: BLE001
+                log.warning("除權息官方源失敗，維持 FinMind：%s", e)
+
+        # 股票 → 市場對照（官方源跳過判斷用）
+        mkt_map = {r[0]: r[1] for r in conn.execute("SELECT stock_id, type FROM stock_info")}
+
         for pass_label, gap_fn in passes:
             if finmind_dead:
                 break
@@ -161,6 +186,9 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     # 股價主源=shioaji 時，個股價格不再走 FinMind（指數仍走 FinMind，
                     # 因 daily_quotes 不含 TAIEX/TPEx）
                     if sj_primary and name == "price_daily" and sid not in INDEX_IDS:
+                        continue
+                    # 官方源已覆蓋該市場的 dataset → FinMind 跳過（備援降級）
+                    if name in official_skip and mkt_map.get(sid) in official_skip[name]:
                         continue
                     first, last = (None, None) if force else db.get_range(conn, name, sid)
                     seg = gap_fn(first, last, default_start, end)
@@ -195,6 +223,87 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
 
     log.info("回補完成，各 dataset 寫入列數：%s", totals)
     _emit_progress({"pass": "完成", "current": total, "total": total, "stock_id": "", "rows": 0})
+
+
+def _trading_dates_desc(conn, start: str, end: str) -> list[str]:
+    """TAIEX 交易日（新到舊）；無日曆退回平日。"""
+    cal = [r[0] for r in conn.execute(
+        "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
+        (start, end)).fetchall()]
+    if cal:
+        return cal
+    d0, d1 = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+    return [d.isoformat() for d in
+            (d1 - dt.timedelta(days=i) for i in range((d1 - d0).days + 1))
+            if d.weekday() < 5]
+
+
+def _official_chips_backfill(conn, start: str, end: str, force: bool = False) -> dict:
+    """TWSE/TPEx 官方按日補 法人+融資券（最新優先，逐日逐市場標記，中斷安全）。
+
+    回傳 {"twse": 是否全期覆蓋完成, "tpex": ...}——覆蓋完成的市場，
+    FinMind 對應 dataset 直接跳過（官方一天 2 次呼叫 vs FinMind 逐檔數千次）。
+    """
+    today = dt.date.today().isoformat()
+    cal = _trading_dates_desc(conn, start, end)
+    if not cal:
+        return {"twse": False, "tpex": False}
+
+    done = {"twse": set(), "tpex": set()}
+    if not force:
+        for mkt in done:
+            done[mkt] = {r[0] for r in conn.execute(
+                "SELECT stock_id FROM fetch_log WHERE dataset=?",
+                (f"{mkt}_chips_daily",)).fetchall()}
+
+    todo = [d for d in cal if d not in done["twse"] or d not in done["tpex"]]
+    if not todo:
+        log.info("官方籌碼源已是最新（無缺日）")
+        return {"twse": True, "tpex": True}
+
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    total = len(todo)
+    for i, day in enumerate(todo):
+        need_twse = day not in done["twse"]
+        need_tpex = day not in done["tpex"]
+        counts = {"twse_inst": 0, "tpex_inst": 0, "twse_margin": 0, "tpex_margin": 0}
+        try:
+            if need_twse:
+                counts["twse_inst"] = twse_source.fetch_twse_institutional(conn, day)
+                counts["twse_margin"] = twse_source.fetch_twse_margin(conn, day)
+            if need_tpex:
+                counts["tpex_inst"] = twse_source.fetch_tpex_institutional(conn, day)
+                counts["tpex_margin"] = twse_source.fetch_tpex_margin(conn, day)
+        except Exception as e:  # noqa: BLE001 — 單日失敗不中斷，下次續補
+            log.warning("官方籌碼 %s 失敗：%s", day, str(e)[:100])
+        rows_day = sum(counts.values())
+        # 逐市場標記完成（當日資料 ~16:30 才公布 → 今天 0 列不標記，明天再補）
+        if need_twse and counts["twse_inst"] > 0 and counts["twse_margin"] > 0:
+            db.merge_range(conn, "twse_chips_daily", day, day, day, now)
+            done["twse"].add(day)
+        if need_tpex and counts["tpex_inst"] > 0 and counts["tpex_margin"] > 0:
+            db.merge_range(conn, "tpex_chips_daily", day, day, day, now)
+            done["tpex"].add(day)
+        conn.commit()
+        _emit_progress({"pass": "籌碼(官方)", "current": i + 1, "total": total,
+                        "stock_id": day, "rows": rows_day})
+
+    cal_set = set(cal)
+    coverage = {mkt: cal_set - {today} <= done[mkt] for mkt in ("twse", "tpex")}
+    return coverage
+
+
+def _official_dividend_backfill(conn, start: str, end: str) -> int:
+    """TWT49U 除權息（日期區間全市場，按季分段避免單次過大）。"""
+    total = 0
+    s = dt.date.fromisoformat(start)
+    e = dt.date.fromisoformat(end)
+    while s <= e:
+        seg_end = min(s + dt.timedelta(days=92), e)
+        total += twse_source.fetch_dividends_range(conn, s.isoformat(), seg_end.isoformat())
+        s = seg_end + dt.timedelta(days=1)
+    conn.commit()
+    return total
 
 
 def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
