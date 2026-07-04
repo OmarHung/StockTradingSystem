@@ -53,7 +53,13 @@ def _records(df):
 # ---------- 基礎 ----------
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "has_api_key": llm.has_api_key()}
+    from src.data import shioaji_source
+    return {
+        "status": "ok",
+        "has_api_key": llm.has_api_key(),
+        "broker_env": shioaji_source.current_env(),   # simulation / production
+        "broker_ready": shioaji_source.available(),
+    }
 
 
 @app.get("/api/models")

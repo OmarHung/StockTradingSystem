@@ -48,6 +48,10 @@ risk:
   max_drawdown_halt_pct: 15.0      # 回撤熔斷門檻 %
 
 # ---- LLM（Phase 2 生效）----
+# ---- 券商環境（shioaji）----
+shioaji:
+  environment: simulation          # simulation=模擬（預設） / production=正式（真金白銀，Phase 5 交易用）
+
 llm:
   analyst_model: claude-sonnet-4-6
   trader_model: claude-sonnet-4-6

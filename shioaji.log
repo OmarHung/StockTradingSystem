@@ -1,0 +1,6 @@
+[pid:18197] 2026-07-04T01:21:21.616833Z  INFO shioaji::api::api_v1::auth::token_login: No cached token available, performing new login
+[pid:18197] 2026-07-04T01:21:21.686920Z  INFO shioaji::api: msg receiver error: Closed
+[pid:18197] 2026-07-04T01:21:21.686932Z  INFO shioaji::api: P2P receiver closed: Closed
+[pid:18965] 2026-07-04T01:22:01.017624Z  INFO shioaji::api::api_v1::auth::token_login: No cached token available, performing new login
+[pid:18965] 2026-07-04T01:22:01.056717Z  INFO shioaji::api: msg receiver error: Closed
+[pid:18965] 2026-07-04T01:22:01.056726Z  INFO shioaji::api: P2P receiver closed: Closed

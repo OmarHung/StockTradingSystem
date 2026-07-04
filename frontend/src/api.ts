@@ -68,7 +68,7 @@ export interface ModelInfo {
 }
 
 export const api = {
-  health: () => get<{ status: string; has_api_key: boolean }>("/health"),
+  health: () => get<{ status: string; has_api_key: boolean; broker_env: "simulation" | "production"; broker_ready: boolean }>("/health"),
   dataStatus: () => get<DataStatus>("/data-status"),
   stocks: () => get<{ stock_id: string; stock_name: string; industry_category: string }[]>("/stocks"),
   quote: (id: string) => get<Quote>(`/quote/${id}`),

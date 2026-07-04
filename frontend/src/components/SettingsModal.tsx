@@ -90,9 +90,39 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </>)}
 
-          {tab === "keys" && (
+          {tab === "keys" && (<>
             <KeysTab env={env} onSaved={(k) => { flash("金鑰已寫入 .env ✓"); api.envStatus().then(setEnv); void k; }} />
-          )}
+
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
+              <div className="form-row">
+                <label>券商環境（shioaji）</label>
+                <select
+                  value={cfg.shioaji?.environment ?? "simulation"}
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    if (v === "production" &&
+                        !window.confirm("⚠️ 切換到「正式環境」後，Phase 5 交易功能將使用真實資金下單！\n\n確定要切換嗎？")) {
+                      return; // 取消：不變更
+                    }
+                    setField("shioaji", "environment", v);
+                    try {
+                      await api.updateConfig("shioaji", { environment: v });
+                      flash(v === "production" ? "已切換正式環境 ⚠️" : "已切換模擬環境 ✓");
+                    } catch (err) { alert(String(err)); }
+                  }}
+                  style={cfg.shioaji?.environment === "production"
+                    ? { borderColor: "var(--up)", color: "var(--up)", fontWeight: 700 } : {}}
+                >
+                  <option value="simulation">模擬環境（安全，預設）</option>
+                  <option value="production">🔴 正式環境（真實資金）</option>
+                </select>
+              </div>
+              <div className="form-hint">
+                行情查詢兩者皆可；下單（Phase 5）在正式環境會動用真錢，且需 CA 憑證。
+                切換立即生效，頂部徽章會同步顯示當前環境。
+              </div>
+            </div>
+          </>)}
         </div>
 
         <div className="modal-foot">

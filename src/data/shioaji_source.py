@@ -18,7 +18,18 @@ from src.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-_api = None  # 模組級單例（登入一次）
+_api = None       # 模組級單例（登入一次）
+_api_mode = None  # 登入時的環境；設定改變則重新登入
+
+
+def current_env() -> str:
+    """讀 settings.yaml 的券商環境：simulation（預設）/ production。"""
+    from src.config import get_settings
+    try:
+        get_settings.cache_clear()  # 設定頁可能剛改過
+        return (get_settings().get("shioaji") or {}).get("environment", "simulation")
+    except Exception:  # noqa: BLE001
+        return "simulation"
 
 
 def available() -> bool:
@@ -31,15 +42,23 @@ def available() -> bool:
 
 
 def _login():
-    global _api
-    if _api is not None:
+    global _api, _api_mode
+    mode = current_env()
+    if _api is not None and _api_mode == mode:
         return _api
+    if _api is not None:  # 環境切換 → 先登出舊連線
+        try:
+            _api.logout()
+        except Exception:  # noqa: BLE001
+            pass
+        _api = None
     import shioaji as sj
 
-    api = sj.Shioaji(simulation=True)  # 查行情用模擬登入即可
+    simulation = mode != "production"
+    api = sj.Shioaji(simulation=simulation)
     api.login(os.environ["SJ_API_KEY"], os.environ["SJ_SEC_KEY"])
-    _api = api
-    log.info("shioaji 已登入（simulation，行情查詢）")
+    _api, _api_mode = api, mode
+    log.info("shioaji 已登入（%s）", "simulation 模擬" if simulation else "⚠️ PRODUCTION 正式環境")
     return _api
 
 

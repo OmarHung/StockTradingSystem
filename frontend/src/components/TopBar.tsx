@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { api, type Quote } from "../api";
 import { fmt, cls } from "./Panel";
 
-/** 頂部狀態列：logo、環境、市場代表指標(0050)、時鐘、資料連線狀態、設定。 */
-export function TopBar({ hasKey, onOpenSettings, onOpenData }: {
-  hasKey: boolean | null; onOpenSettings: () => void; onOpenData: () => void;
+/** 頂部狀態列：logo、券商環境徽章、大盤指標、時鐘、資料連線狀態、設定。 */
+export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData }: {
+  hasKey: boolean | null;
+  brokerEnv: "simulation" | "production" | null;
+  onOpenSettings: () => void;
+  onOpenData: () => void;
 }) {
   const [now, setNow] = useState(new Date());
   const [indices, setIndices] = useState<Quote[]>([]);
@@ -18,7 +21,16 @@ export function TopBar({ hasKey, onOpenSettings, onOpenData }: {
   return (
     <div className="topbar">
       <span className="logo">台股智慧交易終端</span>
-      <span className="badge">研究 / 回測環境</span>
+      {brokerEnv === "production" ? (
+        <span className="badge" style={{
+          background: "rgba(255,67,61,0.18)", color: "var(--up)", borderColor: "var(--up)",
+          fontWeight: 700,
+        }}>🔴 正式環境</span>
+      ) : (
+        <span className="badge" style={{
+          background: "rgba(240,185,11,0.12)", color: "var(--warning)", borderColor: "#5a4a1a",
+        }}>模擬環境</span>
+      )}
       {indices.map((mkt) => (
         <div className="ticker" key={mkt.stock_id}>
           <span className="label">{mkt.name}</span>

@@ -30,13 +30,14 @@ export default function App() {
   const [selected, setSelected] = useState("2330");
   const [name, setName] = useState("台積電");
   const [hasKey, setHasKey] = useState<boolean | null>(null);
+  const [brokerEnv, setBrokerEnv] = useState<"simulation" | "production" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showData, setShowData] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
 
   const { width, containerRef } = useContainerWidth();
 
-  const refreshKey = () => api.health().then((h) => setHasKey(h.has_api_key)).catch(() => setHasKey(false));
+  const refreshKey = () => api.health().then((h) => { setHasKey(h.has_api_key); setBrokerEnv(h.broker_env); }).catch(() => setHasKey(false));
   useEffect(() => { refreshKey(); }, []);
   useEffect(() => { api.watchlist().then(setWatchIds).catch(() => {}); }, []);
   useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
@@ -52,7 +53,7 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <TopBar hasKey={hasKey}
+      <TopBar hasKey={hasKey} brokerEnv={brokerEnv}
         onOpenSettings={() => setShowSettings(true)}
         onOpenData={() => setShowData(true)} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
