@@ -164,6 +164,64 @@ SCHEMA: dict[str, str] = {
             added_at TEXT
         )
     """,
+    # ---- Phase 5：模擬交易帳本 ----
+    "broker_state": """
+        CREATE TABLE IF NOT EXISTS broker_state (
+            key   TEXT PRIMARY KEY,        -- cash / start_capital / trading_enabled
+            value TEXT
+        )
+    """,
+    "positions": """
+        CREATE TABLE IF NOT EXISTS positions (
+            stock_id  TEXT PRIMARY KEY,
+            shares    INTEGER NOT NULL,
+            avg_cost  REAL NOT NULL,
+            stop_loss REAL,
+            target    REAL,
+            industry  TEXT,
+            opened_at TEXT,
+            plan_as_of TEXT               -- 對應的決策日（回溯 LLM 理由用）
+        )
+    """,
+    "orders": """
+        CREATE TABLE IF NOT EXISTS orders (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_as_of TEXT NOT NULL,  -- 決策日（隔日有效）
+            stock_id    TEXT NOT NULL,
+            side        TEXT NOT NULL,     -- BUY / SELL
+            limit_price REAL,
+            shares      INTEGER NOT NULL,
+            stop_loss   REAL,
+            target      REAL,
+            industry    TEXT,
+            status      TEXT NOT NULL,     -- pending / filled / expired / cancelled
+            fill_date   TEXT,
+            fill_price  REAL
+        )
+    """,
+    "fills": """
+        CREATE TABLE IF NOT EXISTS fills (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            date     TEXT NOT NULL,
+            stock_id TEXT NOT NULL,
+            side     TEXT NOT NULL,
+            shares   INTEGER NOT NULL,
+            price    REAL NOT NULL,
+            fee      REAL DEFAULT 0,
+            tax      REAL DEFAULT 0,
+            pnl      REAL,                -- 賣出時的已實現損益（含成本）
+            reason   TEXT                 -- entry / stop / target / manual
+        )
+    """,
+    "equity_history": """
+        CREATE TABLE IF NOT EXISTS equity_history (
+            date            TEXT PRIMARY KEY,
+            cash            REAL,
+            positions_value REAL,
+            equity          REAL,
+            taiex_close     REAL
+        )
+    """,
     # 回補進度紀錄：記錄每檔每類資料「已補範圍」(first_date~last_date)，
     # 供「最新優先」兩趟回補判斷缺口。
     "fetch_log": """

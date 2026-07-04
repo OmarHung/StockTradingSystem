@@ -16,6 +16,7 @@ import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { DataModal } from "./components/DataModal";
 import { MemoryPanel } from "./components/MemoryPanel";
+import { PortfolioPanel } from "./components/PortfolioPanel";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
 // 資料狀態改為頂部按鈕開窗（同設定），騰出版面給大腦活動。
@@ -26,8 +27,9 @@ const LAYOUT: Layout = [
   { i: "screener", x: 8, y: 0, w: 4, h: 7 },
   { i: "report", x: 2, y: 7, w: 6, h: 5 },
   { i: "backtest", x: 8, y: 7, w: 4, h: 5 },
-  { i: "brain", x: 0, y: 12, w: 7, h: 5 },
-  { i: "memory", x: 7, y: 12, w: 5, h: 5 },
+  { i: "portfolio", x: 0, y: 12, w: 12, h: 7 },
+  { i: "brain", x: 0, y: 19, w: 7, h: 5 },
+  { i: "memory", x: 7, y: 19, w: 5, h: 5 },
 ];
 
 export default function App() {
@@ -85,6 +87,7 @@ export default function App() {
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
           <div key="backtest"><BacktestPanel /></div>
           <div key="ranking"><RankingPanel onSelect={setSelected} /></div>
+          <div key="portfolio"><PortfolioPanel onSelect={setSelected} /></div>
           <div key="brain"><BrainPanel /></div>
           <div key="memory"><MemoryPanel /></div>
         </GridLayout>

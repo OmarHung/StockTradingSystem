@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd 排程：平日 15:00 盤後自動執行每日交易流程。
+     安裝：
+       cp scripts/com.stocktrading.daily.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.stocktrading.daily.plist
+     移除：
+       launchctl unload ~/Library/LaunchAgents/com.stocktrading.daily.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stocktrading.daily</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/omar/myprojects/StockTradingSystem/.venv/bin/python</string>
+        <string>-m</string>
+        <string>scripts.run_daily</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/omar/myprojects/StockTradingSystem</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 週一到週五 15:00（盤後：資料更新→決策→掛明日單） -->
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/omar/myprojects/StockTradingSystem/logs/daily_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/omar/myprojects/StockTradingSystem/logs/daily_launchd.log</string>
+</dict>
+</plist>

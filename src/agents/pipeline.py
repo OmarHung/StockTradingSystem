@@ -92,8 +92,13 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
         target=plan.target_price,
         industry=industry,
     )
-    # 組合狀態：Phase 5 接上實際持倉前，用空倉 + 設定資金
-    port = G.PortfolioState.empty(float(cfg["capital"]["total"]))
+    # 組合狀態：用 PaperBroker 的真實持倉/現金/冷卻/回撤（Phase 5）
+    try:
+        from src.broker.paper import PaperBroker
+        port = PaperBroker().portfolio_state(as_of=as_of)
+    except Exception as e:  # noqa: BLE001 — 帳本異常時退回空倉保守評估
+        log.error("讀取帳本失敗，Guard 以空倉評估：%s", e)
+        port = G.PortfolioState.empty(float(cfg["capital"]["total"]))
     with db.connect(cfg.db_path) as conn:
         disp = fetchers.current_disposition_ids(conn, as_of)
         res = G.evaluate(cand, port, rcfg, disposition_ids=disp, as_of=as_of)
@@ -110,6 +115,7 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
             log.info("Guard 核准 %s：%d 股（投入 %s、風險 %s）",
                      stock_id, res.shares, f"{res.est_cost:,.0f}", f"{res.risk_amount:,.0f}")
     return {
+        "industry": industry,
         "approved": res.approved, "shares": res.shares,
         "est_cost": res.est_cost, "risk_amount": res.risk_amount,
         "reject_gate": res.reject_gate, "reject_reason": res.reject_reason,

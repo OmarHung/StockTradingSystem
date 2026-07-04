@@ -233,6 +233,84 @@ def friction(limit: int = 100):
     return _records(df)
 
 
+# ---------- Phase 5：模擬交易（持倉/績效/每日流程/緊急停止） ----------
+_DAILY_JOB = "daily"
+
+
+@app.get("/api/portfolio")
+def portfolio():
+    """持倉 + 現金 + 掛單 + 績效摘要（權益曲線 vs TAIEX）。"""
+    from src.broker.paper import PaperBroker
+    from src.report.performance import performance_summary
+
+    broker = PaperBroker()
+    pos = broker.positions()
+    rows = []
+    for r in pos.to_dict(orient="records"):
+        px = q.get_price(r["stock_id"])
+        last = float(px["close"].iloc[-1]) if not px.empty else r["avg_cost"]
+        mv = r["shares"] * last
+        cost = r["shares"] * r["avg_cost"]
+        rows.append({**r, "last": last, "market_value": round(mv, 0),
+                     "unrealized_pnl": round(mv - cost, 0),
+                     "unrealized_pct": round((last / r["avg_cost"] - 1) * 100, 2) if r["avg_cost"] else 0})
+    return {
+        "cash": broker.cash,
+        "trading_enabled": broker.trading_enabled(),
+        "positions": rows,
+        "pending_orders": _records(broker.pending_orders()),
+        "fills": _records(broker.fills(100)),
+        "performance": performance_summary(),
+    }
+
+
+@app.post("/api/portfolio/reset")
+def portfolio_reset():
+    """重置模擬帳本（清空持倉/委託/成交/權益史，現金回到設定資金）。"""
+    from src.data import database as _db
+    with _db.connect(get_settings().db_path) as conn:
+        for t in ("positions", "orders", "fills", "equity_history"):
+            conn.execute(f"DELETE FROM {t}")
+        cap = float(get_settings()["capital"]["total"])
+        conn.execute("INSERT OR REPLACE INTO broker_state (key, value) VALUES ('cash', ?)", (str(cap),))
+    return {"status": "reset", "cash": float(get_settings()["capital"]["total"])}
+
+
+class TradingToggle(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/trading/toggle")
+def trading_toggle(req: TradingToggle):
+    """緊急停止/恢復：停用時每日流程只做保護性出場，不開新倉。"""
+    from src.broker.paper import PaperBroker
+    PaperBroker().set_trading_enabled(req.enabled)
+    return {"trading_enabled": req.enabled}
+
+
+class DailyRunReq(BaseModel):
+    as_of: str | None = None
+    top_n: int = 3
+
+
+@app.post("/api/daily/run")
+def daily_run(req: DailyRunReq):
+    """背景執行每日主流程（撮合→風控→快照→決策掛單）。"""
+    if jobs.is_running(_DAILY_JOB):
+        raise HTTPException(409, "每日流程已在執行中")
+    args = ["scripts.run_daily", "--top-n", str(req.top_n)]
+    if req.as_of:
+        args += ["--as-of", req.as_of]
+    started = jobs.start_job(_DAILY_JOB, args)
+    return {"started": started}
+
+
+@app.get("/api/daily/status")
+def daily_status():
+    return {"running": jobs.is_running(_DAILY_JOB),
+            "log": jobs.read_log(_DAILY_JOB, tail=25)}
+
+
 # ---------- Phase 4：反思與向量記憶 ----------
 @app.get("/api/memory/status")
 def memory_status():

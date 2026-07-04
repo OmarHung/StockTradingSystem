@@ -102,6 +102,13 @@ export const api = {
     put<{ status: string }>("/config", { section, values }),
   envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean; shioaji_key: boolean }>("/env-status"),
   setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
+  // Phase 5：模擬交易
+  portfolio: () => get<Record<string, any>>("/portfolio"),
+  portfolioReset: () => post<{ status: string; cash: number }>("/portfolio/reset", {}),
+  tradingToggle: (enabled: boolean) => post<{ trading_enabled: boolean }>("/trading/toggle", { enabled }),
+  dailyRun: (asOf?: string, topN = 3) =>
+    post<{ started: boolean }>("/daily/run", { as_of: asOf, top_n: topN }),
+  dailyStatus: () => get<{ running: boolean; log: string }>("/daily/status"),
   // Phase 4：反思與向量記憶
   memoryStatus: () => get<{ experiences: number; rules: number; blocked: number }>("/memory/status"),
   memoryRules: () => get<Record<string, any>[]>("/memory/rules"),
