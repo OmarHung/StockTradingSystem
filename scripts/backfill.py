@@ -168,6 +168,14 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     log.info("除權息官方源（TWT49U）補入 %d 筆（上市檔 FinMind 跳過）", n)
             except Exception as e:  # noqa: BLE001
                 log.warning("除權息官方源失敗，維持 FinMind：%s", e)
+        if "month_revenue" in active:
+            rev_cov = _official_revenue_backfill(conn, default_start, end, force=force)
+            for mkt, ok in rev_cov.items():
+                if ok:
+                    official_skip.setdefault("month_revenue", set()).add(mkt)
+            if any(rev_cov.values()):
+                log.info("月營收官方源（MOPS）覆蓋：%s（FinMind 對應市場跳過）",
+                         "、".join(m for m, ok in rev_cov.items() if ok))
 
         # 股票 → 市場對照（官方源跳過判斷用）
         mkt_map = {r[0]: r[1] for r in conn.execute("SELECT stock_id, type FROM stock_info")}
@@ -313,6 +321,67 @@ def _official_chips_backfill(conn, start: str, end: str, force: bool = False) ->
     cal_set = set(cal)
     coverage = {mkt: cal_set - {today} <= done[mkt] for mkt in ("twse", "tpex")}
     return coverage
+
+
+def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) -> dict:
+    """MOPS 月營收（一市場一月一檔，全市場）。最新月份優先，逐月逐市場標記。
+
+    當月營收於次月 10 日前公告：太新的月份抓到 0 檔不標記（下次再試）；
+    超過 3 個月的舊月份抓不到則標記放棄（避免永遠重試不存在的檔案）。
+    回傳 {"twse": 覆蓋完成, "tpex": ...}（twse↔sii、tpex↔otc）。
+    """
+    # 需要的營收月份 = start 前一個月 ~ end 前一個月（當月營收尚未公告）
+    s = dt.date.fromisoformat(start).replace(day=1)
+    e = dt.date.fromisoformat(end).replace(day=1) - dt.timedelta(days=1)
+    e = e.replace(day=1)
+    months = []
+    cur = e
+    while cur >= s:  # 新到舊（最新優先）
+        months.append((cur.year, cur.month))
+        cur = (cur - dt.timedelta(days=1)).replace(day=1)
+    if not months:
+        return {"twse": False, "tpex": False}
+
+    mkt_map = {"twse": "sii", "tpex": "otc"}
+    done: dict[str, set] = {}
+    for mkt, mops in mkt_map.items():
+        done[mkt] = set() if force else {
+            r[0] for r in conn.execute(
+                "SELECT stock_id FROM fetch_log WHERE dataset=?", (f"mops_{mops}",)).fetchall()}
+
+    today = dt.date.today()
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    total = len(months)
+    for i, (y, m) in enumerate(months):
+        key = f"{y:04d}-{m:02d}"
+        rows_month = 0
+        for mkt, mops in mkt_map.items():
+            if key in done[mkt]:
+                continue
+            try:
+                n = twse_source.fetch_mops_revenue(conn, y, m, mops)
+            except Exception as ex:  # noqa: BLE001
+                log.warning("MOPS %s %s 失敗：%s", mops, key, str(ex)[:80])
+                continue
+            rows_month += n
+            months_old = (today.year - y) * 12 + (today.month - m)
+            # 標記完成的條件：
+            # - 公告期已過（前月且已過 15 日，或更舊）且有抓到 → 完成
+            # - 太舊仍抓不到（>3 月）→ 放棄標記，避免永遠重試
+            # 注意：公告期內（上月10日前）只會抓到部分公司，不可標記
+            fully_announced = months_old >= 2 or (months_old == 1 and today.day > 15)
+            if (n > 0 and fully_announced) or (n == 0 and months_old > 3):
+                db.merge_range(conn, f"mops_{mops}", key, key, key, now)
+                done[mkt].add(key)
+        if rows_month or any(key not in done[mkt] for mkt in done):
+            conn.commit()
+            _emit_progress({"pass": "月營收(MOPS)", "current": i + 1, "total": total,
+                            "stock_id": key, "rows": rows_month})
+
+    all_keys = {f"{y:04d}-{m:02d}" for y, m in months}
+    # 最新一個月可能未公告：覆蓋判定容忍缺最新月
+    latest_key = f"{months[0][0]:04d}-{months[0][1]:02d}"
+    return {mkt: (all_keys - {latest_key}) <= done[mkt] for mkt in mkt_map}
 
 
 def _official_dividend_backfill(conn, start: str, end: str) -> int:

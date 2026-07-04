@@ -26,7 +26,8 @@ log = get_logger(__name__)
 
 _HEADERS = {"accept": "application/json", "user-agent": "Mozilla/5.0"}
 # 每主機獨立節流：TPEx 對高頻更敏感（實測連續抓會被暫時拒連），放慢
-_THROTTLE = {"www.twse.com.tw": 3.0, "www.tpex.org.tw": 6.0}
+_THROTTLE = {"www.twse.com.tw": 3.0, "www.tpex.org.tw": 6.0,
+             "mopsov.twse.com.tw": 3.0}
 _last_call: dict[str, float] = {}
 
 
@@ -263,3 +264,73 @@ def fetch_chips_for_date(conn, date_iso: str) -> dict:
         except Exception as e:  # noqa: BLE001
             log.warning("官方源 %s %s 失敗：%s", key, date_iso, str(e)[:100])
     return out
+
+# ---------- MOPS 月營收（全市場單月一檔，千元）----------
+def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
+    """抓 MOPS 月營收彙總（market: sii=上市 / otc=上櫃）。
+
+    檔案：mopsov.twse.com.tw/nas/t21/{market}/t21sc03_{民國年}_{月}_0.html
+    一檔涵蓋該市場全部公司該月營收（千元，入庫 ×1000 對齊 FinMind 元制）。
+    date 欄沿用 FinMind 慣例＝營收月次月 1 日（公告期為次月 10 日前）。
+    """
+    import datetime as _dt
+    from io import StringIO
+
+    global _last_call
+    host = "mopsov.twse.com.tw"
+    throttle = _THROTTLE.get(host, 3.0)
+    wait = throttle - (time.monotonic() - _last_call.get(host, 0.0))
+    if wait > 0:
+        time.sleep(wait)
+    _last_call[host] = time.monotonic()
+
+    url = (f"https://{host}/nas/t21/{market}/t21sc03_{year - 1911}_{month}_0.html")
+    r = requests.get(url, headers=_HEADERS, timeout=30)
+    if r.status_code == 404:
+        return 0  # 該月檔案尚未產生（或過舊）
+    if r.status_code != 200:
+        raise OfficialSourceError(f"MOPS HTTP {r.status_code}: {url[:80]}")
+    r.encoding = "big5"
+
+    try:
+        tables = pd.read_html(StringIO(r.text))
+    except ValueError:
+        return 0  # 頁面無表格
+
+    # date 慣例：營收月的次月 1 日（與 FinMind 一致，供 as_of 過濾不前視）
+    if month == 12:
+        date_str = f"{year + 1}-01-01"
+    else:
+        date_str = f"{year}-{month + 1:02d}-01"
+
+    rows = []
+    for t in tables:
+        if t.shape[1] < 3 or t.shape[0] < 1:
+            continue
+        # 攤平 MultiIndex 欄名後找「公司代號 + 當月營收」表
+        cols = ["".join(str(x) for x in c) if isinstance(c, tuple) else str(c)
+                for c in t.columns]
+        if not any("公司" in c and "代號" in c for c in cols):
+            continue
+        if not any("當月營收" in c for c in cols):
+            continue
+        rev_idx = next(i for i, c in enumerate(cols) if "當月營收" in c)
+        for _, row in t.iterrows():
+            sid = str(row.iloc[0]).strip()
+            if len(sid) != 4 or not sid.isdigit():
+                continue  # 跳過小計/合計/表頭列
+            rev = _fnum(row.iloc[rev_idx])
+            if rev is None:
+                continue
+            rows.append({
+                "stock_id": sid, "date": date_str,
+                "revenue_year": year, "revenue_month": month,
+                "revenue": int(rev * 1000),   # 千元 → 元（對齊 FinMind）
+            })
+    if not rows:
+        return 0
+    n = db.upsert_dataframe(conn, "month_revenue", pd.DataFrame(rows))
+    now = _dt.datetime.now().isoformat(timespec="seconds")
+    db.merge_range(conn, f"mops_{market}", f"{year:04d}-{month:02d}",
+                   date_str, date_str, now)
+    return n
