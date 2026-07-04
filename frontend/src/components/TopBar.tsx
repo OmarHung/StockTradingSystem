@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { api, type Quote } from "../api";
 import { fmt, cls } from "./Panel";
 
-/** 頂部狀態列：logo、環境、市場代表指標(0050)、時鐘、資料連線狀態。 */
-export function TopBar({ hasKey }: { hasKey: boolean | null }) {
+/** 頂部狀態列：logo、環境、市場代表指標(0050)、時鐘、資料連線狀態、設定。 */
+export function TopBar({ hasKey, onOpenSettings }: { hasKey: boolean | null; onOpenSettings: () => void }) {
   const [now, setNow] = useState(new Date());
   const [mkt, setMkt] = useState<Quote | null>(null);
 
@@ -31,6 +31,7 @@ export function TopBar({ hasKey }: { hasKey: boolean | null }) {
       <span className="badge" style={hasKey ? {} : { background: "#3a2a1a", color: "#f0b90b", borderColor: "#5a3a1a" }}>
         {hasKey === null ? "…" : hasKey ? "AI 已啟用" : "AI 未設 Key"}
       </span>
+      <button className="btn" onClick={onOpenSettings}>⚙️ 設定</button>
       <span className="clock">{now.toLocaleTimeString("zh-TW", { hour12: false })}</span>
     </div>
   );

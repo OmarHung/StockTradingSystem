@@ -14,6 +14,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`/api${path}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
 
 export interface Quote {
   stock_id: string; name: string; last: number | null;
@@ -46,4 +55,10 @@ export const api = {
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),
   brainLog: (limit = 100) => get<Record<string, any>[]>(`/brain-log?limit=${limit}`),
+  // 設定
+  getConfig: () => get<Record<string, any>>("/config"),
+  updateConfig: (section: string, values: Record<string, unknown>) =>
+    put<{ status: string }>("/config", { section, values }),
+  envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean }>("/env-status"),
+  setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
 };

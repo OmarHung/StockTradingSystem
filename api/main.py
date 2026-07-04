@@ -177,3 +177,31 @@ class ConfigUpdate(BaseModel):
 def update_config(req: ConfigUpdate):
     config_io.update_section(req.section, req.values)
     return {"status": "saved"}
+
+
+# ---------- API 金鑰（寫入 .env）----------
+@app.get("/api/env-status")
+def env_status():
+    """回報金鑰是否已設定（不回傳值）。"""
+    return {
+        "finmind_token": bool(os.getenv("FINMIND_TOKEN")),
+        "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")),
+    }
+
+
+class EnvUpdate(BaseModel):
+    key: str
+    value: str
+
+
+_ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY"}
+
+
+@app.post("/api/set-env")
+def set_env(req: EnvUpdate):
+    if req.key not in _ALLOWED_ENV:
+        raise HTTPException(400, f"不允許設定 {req.key}")
+    if not req.value.strip():
+        raise HTTPException(400, "值不可為空")
+    config_io.set_env_var(req.key, req.value.strip())
+    return {"status": "saved"}

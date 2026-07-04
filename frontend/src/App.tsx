@@ -11,6 +11,7 @@ import { KChart } from "./components/KChart";
 import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
+import { SettingsModal } from "./components/SettingsModal";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
 const LAYOUT: Layout = [
@@ -25,15 +26,18 @@ export default function App() {
   const [selected, setSelected] = useState("2330");
   const [name, setName] = useState("台積電");
   const [hasKey, setHasKey] = useState<boolean | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const { width, containerRef } = useContainerWidth();
 
-  useEffect(() => { api.health().then((h) => setHasKey(h.has_api_key)).catch(() => setHasKey(false)); }, []);
+  const refreshKey = () => api.health().then((h) => setHasKey(h.has_api_key)).catch(() => setHasKey(false));
+  useEffect(() => { refreshKey(); }, []);
   useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <TopBar hasKey={hasKey} />
+      <TopBar hasKey={hasKey} onOpenSettings={() => setShowSettings(true)} />
+      {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <GridLayout
           className="layout"
