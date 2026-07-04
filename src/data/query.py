@@ -342,6 +342,17 @@ def stocks_overview() -> list[dict]:
         disp = {r[0] for r in conn.execute(
             "SELECT DISTINCT stock_id FROM disposition WHERE period_start<=? AND period_end>=?",
             (today, today))}
+        # 當月除權息（已發生 ∪ 預告），標示用：stock_id -> (最近日期, 類別)
+        m_start = today[:8] + "01"
+        m_end = today[:7] + "-31"
+        exm = {}
+        for sid, dte, kind in conn.execute("""
+            SELECT stock_id, MIN(date), kind FROM (
+                SELECT stock_id, date, kind FROM dividend WHERE date BETWEEN ? AND ?
+                UNION ALL
+                SELECT stock_id, date, kind FROM dividend_forecast WHERE date BETWEEN ? AND ?
+            ) GROUP BY stock_id""", (m_start, m_end, m_start, m_end)):
+            exm[sid] = (dte, kind or "")
         # 最新一日開高低收與漲跌幅（只掃近 10 天，避免全表窗函數）
         quote = db.read_sql(conn, """
             WITH recent AS (
@@ -378,6 +389,8 @@ def stocks_overview() -> list[dict]:
             "low": _fv(qr.low) if qr else None,
             "close": _fv(qr.close) if qr else None,
             "change_pct": _fv(qr.change_pct) if qr else None,
+            "ex_date": exm[r.stock_id][0] if r.stock_id in exm else None,
+            "ex_kind": exm[r.stock_id][1] if r.stock_id in exm else None,
         })
     return out
 

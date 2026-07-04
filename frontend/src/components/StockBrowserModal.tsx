@@ -54,6 +54,7 @@ interface Row {
   downloaded: boolean; disposition: boolean;
   open: number | null; high: number | null; low: number | null;
   close: number | null; change_pct: number | null;
+  ex_date: string | null; ex_kind: string | null;
 }
 
 const MAX_SHOW = 400;
@@ -105,6 +106,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
       if (status === "downloaded" && !r.downloaded) return false;
       if (status === "missing" && r.downloaded) return false;
       if (status === "disposition" && !r.disposition) return false;
+      if (status === "exmonth" && !r.ex_date) return false;
       if (kw && !r.stock_id.toLowerCase().includes(kw) && !r.name.toLowerCase().includes(kw)) return false;
       return true;
     });
@@ -169,6 +171,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
             <option value="downloaded">已下載</option>
             <option value="missing">未下載</option>
             <option value="disposition">處置中</option>
+            <option value="exmonth">當月除權息</option>
           </select>
         </div>
 
@@ -203,6 +206,10 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     <td style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.industry}</td>
                     <td>
                       {r.disposition && <span className="tag" style={{ background: "rgba(255,67,61,0.15)", color: "var(--up)", marginRight: 3 }}>處置</span>}
+                      {r.ex_date && <span className="tag" title={`${r.ex_date} 除${r.ex_kind || "權息"}`}
+                        style={{ background: "rgba(240,185,11,0.15)", color: "#f0b90b", marginRight: 3 }}>
+                        除{(r.ex_kind || "權息").replace("除", "")} {r.ex_date.slice(5).replace("-", "/")}
+                      </span>}
                       {r.downloaded
                         ? <span className="tag" style={{ background: "rgba(14,203,129,0.12)", color: "var(--down)" }}>已下載</span>
                         : <span className="tag" style={{ background: "#2a3040", color: "var(--text-dim)" }}>未下載</span>}
