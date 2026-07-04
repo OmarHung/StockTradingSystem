@@ -35,6 +35,28 @@ class OfficialSourceError(RuntimeError):
     pass
 
 
+def _make_session() -> requests.Session:
+    """TPEx 憑證缺 Subject Key Identifier 擴展，Python 3.13 起預設的
+    VERIFY_X509_STRICT 會直接握手失敗（curl/瀏覽器都能連）。
+    這裡只關掉 strict 旗標——憑證鏈與主機名驗證照常。"""
+    import ssl
+    from requests.adapters import HTTPAdapter
+
+    class _LaxAdapter(HTTPAdapter):
+        def init_poolmanager(self, *a, **kw):
+            ctx = ssl.create_default_context()
+            ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+            kw["ssl_context"] = ctx
+            return super().init_poolmanager(*a, **kw)
+
+    s = requests.Session()
+    s.mount("https://www.tpex.org.tw/", _LaxAdapter())
+    return s
+
+
+_session = _make_session()
+
+
 def _get_json(url: str) -> dict:
     """節流 GET（官方站禮貌頻率，逐主機獨立），非 JSON/非 200 拋錯。"""
     host = url.split("/")[2]
@@ -43,7 +65,7 @@ def _get_json(url: str) -> dict:
     if wait > 0:
         time.sleep(wait)
     _last_call[host] = time.monotonic()
-    r = requests.get(url, headers=_HEADERS, timeout=30)
+    r = _session.get(url, headers=_HEADERS, timeout=30)
     if r.status_code != 200:
         raise OfficialSourceError(f"HTTP {r.status_code}: {url[:80]}")
     try:
@@ -285,7 +307,7 @@ def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
     _last_call[host] = time.monotonic()
 
     url = (f"https://{host}/nas/t21/{market}/t21sc03_{year - 1911}_{month}_0.html")
-    r = requests.get(url, headers=_HEADERS, timeout=30)
+    r = _session.get(url, headers=_HEADERS, timeout=30)
     if r.status_code == 404:
         return 0  # 該月檔案尚未產生（或過舊）
     if r.status_code != 200:
@@ -334,3 +356,59 @@ def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
     db.merge_range(conn, f"mops_{market}", f"{year:04d}-{month:02d}",
                    date_str, date_str, now)
     return n
+
+
+# ---------- TPEx 除權息（openapi 近期快照，схema 依官方 swagger）----------
+def fetch_tpex_dividend(conn) -> int:
+    """上櫃除權息計算結果（tpex_exright_daily，官方 swagger 定義欄位）。
+
+    無日期參數＝近期滾動快照 → 供每日更新持續累積；歷史由 FinMind 備援補。
+    對照 dividend 表：before=除權息前收盤、after=除權息參考價、
+    dividend=權值加息值、kind=權或息。
+    """
+    global _last_call
+    host = "www.tpex.org.tw"
+    throttle = _THROTTLE.get(host, 6.0)
+    wait = throttle - (time.monotonic() - _last_call.get(host, 0.0))
+    if wait > 0:
+        time.sleep(wait)
+    _last_call[host] = time.monotonic()
+
+    r = _session.get(f"https://{host}/openapi/v1/tpex_exright_daily",
+                     headers=_HEADERS, timeout=30)
+    if r.status_code != 200:
+        raise OfficialSourceError(f"tpex_exright_daily HTTP {r.status_code}")
+    data = r.json()
+    if not isinstance(data, list):
+        return 0
+
+    rows = []
+    for d in data:
+        sid = str(d.get("SecuritiesCompanyCode", "")).strip()
+        date = _any_date(d.get("Date", ""))
+        before = _fnum(d.get("ClosePriceBeforeExRightsDiviend"))
+        after = _fnum(d.get("ExRightsDiviendQuote"))
+        if not sid or not date or not before or not after:
+            continue
+        rows.append({
+            "stock_id": sid, "date": date,
+            "before_price": before, "after_price": after,
+            "dividend": _fnum(d.get("StockDividendPlusCashDividend")),
+            "kind": str(d.get("ExRightsDiviend", "")).strip(),
+        })
+    if not rows:
+        return 0
+    return db.upsert_dataframe(conn, "dividend", pd.DataFrame(rows))
+
+
+def _any_date(s) -> str | None:
+    """openapi 日期容錯：民國7碼'1150102' / 西元8碼'20260102' /
+    含分隔符民國（交給 _roc_date）/ ISO 'YYYY-MM-DD' 皆可。"""
+    s = str(s or "").strip()
+    if len(s) == 7 and s.isdigit():
+        return _roc_date(f"{s[:3]}/{s[3:5]}/{s[5:7]}")
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    if len(s) == 10 and s[4] == "-":
+        return s
+    return _roc_date(s)

@@ -385,7 +385,11 @@ def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) 
 
 
 def _official_dividend_backfill(conn, start: str, end: str) -> int:
-    """TWT49U 除權息（日期區間全市場，按季分段避免單次過大）。"""
+    """TWT49U 除權息（日期區間全市場，按季分段避免單次過大）。
+
+    另抓 TPEx openapi tpex_exright_daily（無日期參數＝近期滾動快照，
+    每次執行持續累積上櫃除權息；2 年歷史缺口仍由 FinMind 備援補齊）。
+    """
     total = 0
     s = dt.date.fromisoformat(start)
     e = dt.date.fromisoformat(end)
@@ -393,6 +397,13 @@ def _official_dividend_backfill(conn, start: str, end: str) -> int:
         seg_end = min(s + dt.timedelta(days=92), e)
         total += twse_source.fetch_dividends_range(conn, s.isoformat(), seg_end.isoformat())
         s = seg_end + dt.timedelta(days=1)
+    try:
+        n_tpex = twse_source.fetch_tpex_dividend(conn)
+        if n_tpex:
+            log.info("除權息 TPEx 官方快照補入 %d 筆", n_tpex)
+        total += n_tpex
+    except Exception as e2:  # noqa: BLE001
+        log.warning("除權息 TPEx 官方快照失敗（上櫃維持 FinMind）：%s", str(e2)[:100])
     conn.commit()
     return total
 
