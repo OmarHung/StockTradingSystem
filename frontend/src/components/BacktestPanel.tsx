@@ -54,24 +54,31 @@ export function BacktestPanel() {
   return (
     <Panel title="策略回測" icon="🧪"
       right={
-        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6 }}>
           <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
             {STRATS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
           </select>
-          <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
-            title="回測起日" style={{ width: 118, fontSize: 11 }} />
-          <span style={{ color: "var(--text-dim)", fontSize: 11 }}>~</span>
-          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
-            title="回測迄日" style={{ width: 118, fontSize: 11 }} />
-          <input type="number" value={cash} step={100_000} min={100_000}
-            onChange={(e) => setCash(Number(e.target.value))}
-            title="初始資金（元）" style={{ width: 92, fontSize: 11 }} />
-          <input type="number" value={maxPos} min={1} max={30}
-            onChange={(e) => setMaxPos(Number(e.target.value))}
-            title="最大持倉檔數" style={{ width: 46, fontSize: 11 }} />
           <button className="btn primary" onClick={run} disabled={loading}>回測</button>
         </div>
       }>
+      {/* 參數工具列（放面板內第一行，避免擠爆標題列） */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 8px",
+        borderBottom: "1px solid var(--border)", flexWrap: "wrap", fontSize: 11 }}>
+        <span style={{ color: "var(--text-dim)" }}>區間</span>
+        <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
+          style={{ width: 118, fontSize: 11 }} />
+        <span style={{ color: "var(--text-dim)" }}>~</span>
+        <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
+          style={{ width: 118, fontSize: 11 }} />
+        <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>資金</span>
+        <input type="number" value={cash} step={100_000} min={100_000}
+          onChange={(e) => setCash(Number(e.target.value))}
+          style={{ width: 90, fontSize: 11 }} />
+        <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>持倉上限</span>
+        <input type="number" value={maxPos} min={1} max={30}
+          onChange={(e) => setMaxPos(Number(e.target.value))}
+          style={{ width: 46, fontSize: 11 }} />
+      </div>
       {loading && <div className="spinner">回測中…</div>}
       {m && (
         <div style={{ display: "flex", gap: 4, padding: "4px 6px", flexWrap: "wrap" }}>
