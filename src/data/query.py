@@ -346,13 +346,16 @@ def stocks_overview() -> list[dict]:
         m_start = today[:8] + "01"
         m_end = today[:7] + "-31"
         exm = {}
-        for sid, dte, kind in conn.execute("""
-            SELECT stock_id, MIN(date), kind FROM (
-                SELECT stock_id, date, kind FROM dividend WHERE date BETWEEN ? AND ?
+        # SQLite 特性：搭配 MIN(date) 的裸欄位取自最小日期那一列
+        for sid, dte, kind, amt in conn.execute("""
+            SELECT stock_id, MIN(date), kind, amt FROM (
+                SELECT stock_id, date, kind, dividend AS amt
+                FROM dividend WHERE date BETWEEN ? AND ?
                 UNION ALL
-                SELECT stock_id, date, kind FROM dividend_forecast WHERE date BETWEEN ? AND ?
+                SELECT stock_id, date, kind, cash_dividend AS amt
+                FROM dividend_forecast WHERE date BETWEEN ? AND ?
             ) GROUP BY stock_id""", (m_start, m_end, m_start, m_end)):
-            exm[sid] = (dte, kind or "")
+            exm[sid] = (dte, kind or "", round(float(amt), 2) if amt else None)
         # 最新一日開高低收與漲跌幅（只掃近 10 天，避免全表窗函數）
         quote = db.read_sql(conn, """
             WITH recent AS (
@@ -391,6 +394,7 @@ def stocks_overview() -> list[dict]:
             "change_pct": _fv(qr.change_pct) if qr else None,
             "ex_date": exm[r.stock_id][0] if r.stock_id in exm else None,
             "ex_kind": exm[r.stock_id][1] if r.stock_id in exm else None,
+            "ex_amount": exm[r.stock_id][2] if r.stock_id in exm else None,
         })
     return out
 

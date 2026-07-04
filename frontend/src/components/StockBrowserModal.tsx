@@ -54,7 +54,7 @@ interface Row {
   downloaded: boolean; disposition: boolean;
   open: number | null; high: number | null; low: number | null;
   close: number | null; change_pct: number | null;
-  ex_date: string | null; ex_kind: string | null;
+  ex_date: string | null; ex_kind: string | null; ex_amount: number | null;
 }
 
 const MAX_SHOW = 400;
@@ -206,9 +206,9 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     <td style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.industry}</td>
                     <td>
                       {r.disposition && <span className="tag" style={{ background: "rgba(255,67,61,0.15)", color: "var(--up)", marginRight: 3 }}>處置</span>}
-                      {r.ex_date && <span className="tag" title={`${r.ex_date} 除${r.ex_kind || "權息"}`}
+                      {r.ex_date && <span className="tag" title={`${r.ex_date} 除${(r.ex_kind || "權息").replace("除", "")}${r.ex_amount != null ? ` ${r.ex_amount} 元` : ""}`}
                         style={{ background: "rgba(240,185,11,0.15)", color: "#f0b90b", marginRight: 3 }}>
-                        除{(r.ex_kind || "權息").replace("除", "")} {r.ex_date.slice(5).replace("-", "/")}
+                        除{(r.ex_kind || "權息").replace("除", "")} {r.ex_date.slice(5).replace("-", "/")}{r.ex_amount != null ? ` · ${fmt(r.ex_amount, 2)}` : ""}
                       </span>}
                       {r.downloaded
                         ? <span className="tag" style={{ background: "rgba(14,203,129,0.12)", color: "var(--down)" }}>已下載</span>
