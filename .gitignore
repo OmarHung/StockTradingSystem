@@ -5,13 +5,14 @@ __pycache__/
 .env
 
 # 資料與日誌（不入版控）
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
-data/*.parquet
-logs/*.log
-logs/jobs/
+data/
+logs/
+shioaji.log          # shioaji SDK 在專案根目錄自動寫的運行 log
+*.log
+
+# shioaji 快取（token/合約快取，含登入痕跡）
+.shioaji/
+sj_log/
 
 # 前端（React）
 frontend/node_modules/
@@ -19,5 +20,10 @@ frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
 
+# macOS
+.DS_Store
+
 # IDE
 .idea/claudeCodeTabState.xml
+.idea/workspace.xml
+.idea/dataSources.local.xml
