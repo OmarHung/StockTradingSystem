@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Panel, fmt } from "./Panel";
 
@@ -10,10 +10,22 @@ const ACTION: Record<string, { cls: string; label: string }> = {
 
 /** AI 選股報告：跑分析師團隊 + 驗證層 + 交易員，顯示交易計畫。 */
 export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (id: string) => void }) {
-  const [asOf, setAsOf] = useState("2025-06-30");
+  const [asOf, setAsOf] = useState("");
   const [topN, setTopN] = useState(3);
   const [recs, setRecs] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // 預設帶入最新交易日；順便載回該日已存的交易計畫（重整後不遺失）
+  useEffect(() => {
+    api.dataStatus().then((s) => {
+      if (s.latest_trading_day) {
+        setAsOf(s.latest_trading_day);
+        api.tradePlans(s.latest_trading_day)
+          .then((plans) => { if (plans.length) setRecs(plans); })
+          .catch(() => {});
+      }
+    }).catch(() => {});
+  }, []);
 
   const run = async () => {
     setLoading(true);
@@ -29,7 +41,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
           <input type="number" min={1} max={10} value={topN} style={{ width: 48 }}
             onChange={(e) => setTopN(+e.target.value)} />
-          <button className="btn primary" onClick={run} disabled={loading || !hasKey}>分析</button>
+          <button className="btn primary" onClick={run} disabled={loading || !hasKey || !asOf}>分析</button>
         </div>
       }>
       {!hasKey && <div className="empty-hint">未設定 ANTHROPIC_API_KEY，無法執行 LLM 分析。</div>}
