@@ -170,6 +170,32 @@ class PaperBroker:
             self._set_state(conn, "cash", str(cash))
         return results
 
+    def intraday_exit(self, date: str, stock_id: str, price: float, reason: str) -> dict | None:
+        """盤中即時出場（停損監控觸發）：以指定價格立即平倉單一持股。
+
+        與 check_stops 相同的費稅/損益/帳本邏輯；持股不存在回 None（冪等，
+        收盤 check_stops 再跑到同一檔也不會重複出場）。
+        """
+        with db.connect(self.db_path) as conn:
+            pos = db.read_sql(conn, "SELECT * FROM positions WHERE stock_id=?", (stock_id,))
+            if pos.empty:
+                return None
+            p = pos.to_dict(orient="records")[0]
+            cash = float(self._get_state(conn, "cash", "0"))
+            amount = p["shares"] * price
+            fee = COST.fee_rate * COST.fee_discount * amount
+            tax = COST.tax_rate * amount
+            pnl = (price - p["avg_cost"]) * p["shares"] - fee - tax
+            cash += amount - fee - tax
+            conn.execute("DELETE FROM positions WHERE stock_id=?", (stock_id,))
+            conn.execute(
+                "INSERT INTO fills (date, stock_id, side, shares, price, fee, tax, pnl, reason) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (date, stock_id, "SELL", p["shares"], price, fee, tax, pnl, reason))
+            self._set_state(conn, "cash", str(cash))
+        return {"stock_id": stock_id, "reason": reason, "price": price,
+                "shares": p["shares"], "pnl": round(pnl, 0)}
+
     def check_stops(self, date: str) -> list[dict]:
         """收盤風控：low ≤ 停損 → 以停損價出場；high ≥ 停利 → 以目標價出場（雙觸以停損計）。"""
         results = []

@@ -22,6 +22,11 @@ log = get_logger("scheduler")
 
 # job 定義：name -> (顯示名, jobs.py 的 job 名, 啟動參數)
 JOB_DEFS = {
+    "intraday": {
+        "label": "盤中停損監控",
+        "job_name": "intraday",
+        "args": ["scripts.intraday_monitor"],   # 09:00 啟動，收盤/無持倉自行結束
+    },
     "dataupdate": {
         "label": "資料增量更新",
         "job_name": "backfill",                      # 與 WebUI 資料視窗共用監控

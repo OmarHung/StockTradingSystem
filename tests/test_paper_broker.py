@@ -97,3 +97,17 @@ def test_emergency_toggle(broker):
     assert broker.trading_enabled() is False
     broker.set_trading_enabled(True)
     assert broker.trading_enabled() is True
+
+def test_intraday_exit(broker):
+    """盤中出場：平倉、費稅損益、現金入帳；不存在的持股回 None（冪等）。"""
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, opened_at) "
+                     "VALUES ('2330', 1000, 100.0, 95.0, 120.0, '2026-07-01')")
+    cash0 = broker.cash
+    r = broker.intraday_exit("2026-07-05", "2330", 95.0, "stop_intraday")
+    assert r is not None and r["reason"] == "stop_intraday" and r["shares"] == 1000
+    assert broker.positions().empty
+    assert broker.cash > cash0          # 賣出入帳：95000 - 費稅
+    assert broker.fills().iloc[0]["reason"] == "stop_intraday"
+    # 再出場同一檔 → None（收盤 check_stops 不會重複出場）
+    assert broker.intraday_exit("2026-07-05", "2330", 95.0, "stop") is None

@@ -229,9 +229,10 @@ StockTradingSystem/
 ### 🟡 中優先（規劃內未實作的功能）
 | 缺口 | 出處 | 說明 |
 |---|---|---|
+| ~~盤中即時停損~~ | Phase 5 | ✅ 已解（2026-07-05）：scripts/intraday_monitor.py 排程 09:00 啟動，30 秒輪詢持倉快照（low/high 對照停損/停利），觸價即出場（intraday_exit 冪等，收盤 check_stops 為備援） |
 | 移動停利（trailing stop） | Phase 3 | PaperBroker 目前只有固定停損/停利 |
 | 日報推播（Telegram/LINE） | Phase 5 | 每日流程結果目前只在 UI/log 可見 |
-| 盤中即時停損 | Phase 5 | 現為收盤觸價檢查；需 shioaji 即時串流 |
+
 | A/B 回測（有無 reflection 對比） | Phase 4 | 待模擬交易累積足量樣本 |
 | 新聞分析師 + RAG 過濾 | Phase 2 | 需新聞資料源（FinMind TaiwanStockNews） |
 | mplfinance 視覺 K 線雙模輸入 | Phase 2 | 技術分析師目前純數據輸入 |

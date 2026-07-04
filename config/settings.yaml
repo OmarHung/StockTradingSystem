@@ -64,6 +64,9 @@ logging:
 
 # ---- 後端內建排程（取代 launchd；WebUI 設定頁可調）----
 scheduler:
+  intraday:
+    enabled: true
+    time: "09:00"                  # 盤中停損監控（開盤啟動，收盤/無持倉自行結束）
   dataupdate:
     enabled: true
     time: "14:30"                  # 平日盤後資料增量更新（HH:MM，24h制）
