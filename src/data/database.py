@@ -78,6 +78,17 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, revenue_year, revenue_month)
         )
     """,
+    # 每日估值指標（TWSE BWIBBU_d / TPEx peQryDate，官方按日全市場）
+    "valuation": """
+        CREATE TABLE IF NOT EXISTS valuation (
+            stock_id       TEXT NOT NULL,
+            date           TEXT NOT NULL,
+            per            REAL,           -- 本益比（虧損公司為 NULL）
+            pbr            REAL,           -- 股價淨值比
+            dividend_yield REAL,           -- 殖利率(%)
+            PRIMARY KEY (stock_id, date)
+        )
+    """,
     # 除權息結果（供還原價計算；factor = after_price / before_price）
     "dividend": """
         CREATE TABLE IF NOT EXISTS dividend (

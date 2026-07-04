@@ -222,7 +222,7 @@ StockTradingSystem/
 | 缺口 | 現況 | 建議 |
 |---|---|---|
 | ~~月營收覆蓋僅 7%~~ | ✅ 已解（2026-07-04）：MOPS 官方月報升主源，7%→86% | 完成 |
-| ~~除權息覆蓋僅 17%~~ | ✅ 已解（2026-07-04）：TPEx openapi `tpex_exright_daily` 接上（快照式，每日回補持續累積，實測 13 筆入庫）；歷史缺口由 FinMind auto-wait 磨補。附帶抓到真兇：先前「TPEx 連線被拒」= Python 3.13 預設 `VERIFY_X509_STRICT` 撞上 TPEx 憑證缺 SKI 擴展，已用放寬 strict 的 session 修復（TPEx 籌碼源同步復活）。備用端點：BWIBBU_d / tpex_mainboard_peratio_analysis（本益比/殖利率/淨值比，基本面分析師升級素材）、t187ap45_L（股利分派） | 完成 |
+| ~~除權息覆蓋僅 17%~~ | ✅ 已解（2026-07-04）：TPEx openapi `tpex_exright_daily` 接上（快照式，每日回補持續累積，實測 13 筆入庫）；歷史缺口由 FinMind auto-wait 磨補。附帶抓到真兇：先前「TPEx 連線被拒」= Python 3.13 預設 `VERIFY_X509_STRICT` 撞上 TPEx 憑證缺 SKI 擴展，已用放寬 strict 的 session 修復（TPEx 籌碼源同步復活）。加碼亦完成：估值指標（本益比/殖利率/股價淨值比）已接入——TWSE BWIBBU_d + TPEx peQryDate（歷史按日可查，valuation 表 + 逐日標記回補），基本面分析師（含 per_percentile_1y 歷史位階、cited_per 驗證）、股票瀏覽器、資料健康報告全串上 | 完成 |
 | **Phase 5 驗收：4 週無人工介入實跑** | 機制完成、launchd 範本就緒，尚未起跑 | 重置帳本 → 掛排程 → 開始計時 |
 
 ### 🟡 中優先（規劃內未實作的功能）

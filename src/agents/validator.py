@@ -43,6 +43,10 @@ def validate_fundamental(report, feats: dict, stock_id: str, as_of: str) -> tupl
         flags.append(
             f"營收年增率宣稱 {report.cited_revenue_yoy} 與實算 {feats.get('revenue_yoy')} 不符"
         )
+    if _mismatch(getattr(report, "cited_per", None), feats.get("per")):
+        flags.append(
+            f"本益比宣稱 {report.cited_per} 與實算 {feats.get('per')} 不符"
+        )
     return _finish("fundamental", flags, report.confidence, stock_id, as_of)
 
 

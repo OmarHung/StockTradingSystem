@@ -30,6 +30,7 @@ export function DataModal({ onClose }: { onClose: () => void }) {
     { key: "margin", label: "融資券" },
     { key: "month_revenue", label: "月營收" },
     { key: "dividend", label: "除權息" },
+    { key: "valuation", label: "估值(本益比)" },
   ];
   const [dsSel, setDsSel] = useState<Record<string, boolean>>(
     Object.fromEntries(DATASETS.map((d) => [d.key, true])));

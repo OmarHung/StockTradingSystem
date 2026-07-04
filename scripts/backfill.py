@@ -40,6 +40,7 @@ FETCHERS = {
 DATASET_LABELS = {
     "price_daily": "股價日K", "institutional": "三大法人", "margin": "融資融券",
     "month_revenue": "月營收", "dividend": "除權息",
+    "valuation": "估值(本益比/殖利率/淨值比)",   # 純官方源（BWIBBU_d/peQryDate），無 FinMind 備援
 }
 
 # 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補
@@ -103,10 +104,11 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
     default_start = start or cfg.backfill_start
     end = end or dt.date.today().isoformat()
 
-    # 要回補哪些資料類型（預設全部）
-    active = {k: v for k, v in FETCHERS.items() if not datasets or k in datasets}
-    if not active:
-        log.error("無有效資料類型（可選：%s）", ",".join(FETCHERS))
+    # 要回補哪些資料類型（預設全部）；active = 其中走 FinMind 的子集
+    requested = set(datasets) if datasets else set(DATASET_LABELS)
+    active = {k: v for k, v in FETCHERS.items() if k in requested}
+    if not active and not (requested & set(DATASET_LABELS)):
+        log.error("無有效資料類型（可選：%s）", ",".join(DATASET_LABELS))
         return
 
     finmind_dead = False  # 402 額度用罄 → 停止所有 FinMind 拉取
@@ -138,7 +140,7 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
 
         log.info("開始回補 %d 檔，期間 %s ~ %s（%s），資料類型：%s",
                  total, default_start, end, "強制重抓" if force else "最新優先",
-                 "、".join(DATASET_LABELS[k] for k in active))
+                 "、".join(DATASET_LABELS[k] for k in DATASET_LABELS if k in requested))
         totals = {name: 0 for name in active}
 
         # 股價主源：shioaji（按交易日全市場、最新優先、流量制額度寬）；
@@ -160,6 +162,8 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
             if covered.get("twse") or covered.get("tpex"):
                 log.info("法人/融資券官方源覆蓋完成：%s（FinMind 對應市場跳過）",
                          "、".join(m for m, ok in covered.items() if ok))
+        if "valuation" in requested:
+            _official_valuation_backfill(conn, default_start, end, force=force)
         if "dividend" in active:
             try:
                 n = _official_dividend_backfill(conn, default_start, end)
@@ -323,6 +327,69 @@ def _official_chips_backfill(conn, start: str, end: str, force: bool = False) ->
     return coverage
 
 
+def _official_valuation_backfill(conn, start: str, end: str, force: bool = False) -> None:
+    """TWSE BWIBBU_d / TPEx peQryDate 按日補估值（本益比/殖利率/股價淨值比）。
+
+    與籌碼迴圈同模式：最新優先、逐日逐市場標記（twse_val_daily/tpex_val_daily）、
+    熔斷保護。純官方源，無 FinMind 備援（FinMind 免費層無此資料集）。
+    """
+    today = dt.date.today().isoformat()
+    cal = _trading_dates_desc(conn, start, end)
+    if not cal:
+        return
+
+    done = {"twse": set(), "tpex": set()}
+    if not force:
+        for mkt in done:
+            done[mkt] = {r[0] for r in conn.execute(
+                "SELECT stock_id FROM fetch_log WHERE dataset=?",
+                (f"{mkt}_val_daily",)).fetchall()}
+
+    todo = [d for d in cal if d not in done["twse"] or d not in done["tpex"]]
+    if not todo:
+        log.info("估值官方源已是最新（無缺日）")
+        return
+
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    total = len(todo)
+    consec_fail = {"twse": 0, "tpex": 0}
+    tripped: set[str] = set()
+
+    def _fetch(mkt: str, fn, day: str) -> int:
+        if mkt in tripped:
+            return 0
+        try:
+            n = fn(conn, day)
+            consec_fail[mkt] = 0
+            return n
+        except Exception as e:  # noqa: BLE001
+            consec_fail[mkt] += 1
+            log.warning("估值 %s %s 失敗：%s", mkt, day, str(e)[:90])
+            if consec_fail[mkt] >= 3:
+                tripped.add(mkt)
+                log.warning("估值源 %s 連續失敗 3 次，本輪停用（缺日下次自動續補）", mkt)
+            return 0
+
+    for i, day in enumerate(todo):
+        need_twse = day not in done["twse"] and "twse" not in tripped
+        need_tpex = day not in done["tpex"] and "tpex" not in tripped
+        if not need_twse and not need_tpex:
+            if tripped >= {"twse", "tpex"}:
+                break
+            continue
+        n_twse = _fetch("twse", twse_source.fetch_twse_valuation, day) if need_twse else 0
+        n_tpex = _fetch("tpex", twse_source.fetch_tpex_valuation, day) if need_tpex else 0
+        if need_twse and n_twse > 0:
+            db.merge_range(conn, "twse_val_daily", day, day, day, now)
+            done["twse"].add(day)
+        if need_tpex and n_tpex > 0:
+            db.merge_range(conn, "tpex_val_daily", day, day, day, now)
+            done["tpex"].add(day)
+        conn.commit()
+        _emit_progress({"pass": "估值(官方)", "current": i + 1, "total": total,
+                        "stock_id": day, "rows": n_twse + n_tpex})
+
+
 def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) -> dict:
     """MOPS 月營收（一市場一月一檔，全市場）。最新月份優先，逐月逐市場標記。
 
@@ -466,7 +533,7 @@ def main() -> None:
     ap.add_argument("--end", help="結束日 YYYY-MM-DD（預設今天）")
     ap.add_argument("--limit", type=int, help="限制回補檔數")
     ap.add_argument("--force", action="store_true", help="忽略已補範圍，全期重抓")
-    ap.add_argument("--datasets", help=f"逗號分隔的資料類型（預設全部）：{','.join(FETCHERS)}")
+    ap.add_argument("--datasets", help=f"逗號分隔的資料類型（預設全部）：{','.join(DATASET_LABELS)}")
     ap.add_argument("--auto-wait", action="store_true",
                     help="FinMind 額度用罄時自動等到下個整點續跑（背景/過夜更新用）")
     args = ap.parse_args()

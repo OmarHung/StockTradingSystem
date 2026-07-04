@@ -35,6 +35,9 @@ from src.screener.screener import run_screener  # noqa: E402
 
 app = FastAPI(title="StockTradingSystem API", version="0.1.0")
 
+# 確保資料表齊全（新增資料集後，API 先於回補啟動也不會查表失敗）
+db.init_db(get_settings().db_path)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

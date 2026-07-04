@@ -60,24 +60,39 @@ def chips_features(stock_id: str, as_of: str, lookback: int = 5) -> dict:
 
 
 def fundamental_features(stock_id: str, as_of: str) -> dict:
-    """基本面事實：最新月營收與年增率。"""
+    """基本面事實：最新月營收與年增率 + 最新估值（本益比/淨值比/殖利率）。"""
+    out: dict = {}
     rev = q.get_month_revenue(stock_id)
     rev = rev[rev["date"] <= as_of] if not rev.empty else rev
-    if rev.empty:
-        return {}
-    rev = rev.sort_values(["revenue_year", "revenue_month"])
-    latest = rev.iloc[-1]
-    yr, mo = int(latest["revenue_year"]), int(latest["revenue_month"])
-    prev = rev[(rev["revenue_year"] == yr - 1) & (rev["revenue_month"] == mo)]
-    yoy = None
-    if not prev.empty and prev.iloc[0]["revenue"]:
-        yoy = round(float(latest["revenue"]) / float(prev.iloc[0]["revenue"]) - 1.0, 4)
-    return {
-        "latest_revenue_year": yr,
-        "latest_revenue_month": mo,
-        "latest_revenue": int(latest["revenue"]) if latest["revenue"] else None,
-        "revenue_yoy": yoy,
-    }
+    if not rev.empty:
+        rev = rev.sort_values(["revenue_year", "revenue_month"])
+        latest = rev.iloc[-1]
+        yr, mo = int(latest["revenue_year"]), int(latest["revenue_month"])
+        prev = rev[(rev["revenue_year"] == yr - 1) & (rev["revenue_month"] == mo)]
+        yoy = None
+        if not prev.empty and prev.iloc[0]["revenue"]:
+            yoy = round(float(latest["revenue"]) / float(prev.iloc[0]["revenue"]) - 1.0, 4)
+        out.update({
+            "latest_revenue_year": yr,
+            "latest_revenue_month": mo,
+            "latest_revenue": int(latest["revenue"]) if latest["revenue"] else None,
+            "revenue_yoy": yoy,
+        })
+    val = q.get_valuation(stock_id)
+    val = val[val["date"] <= as_of] if not val.empty else val
+    if not val.empty:
+        v = val.iloc[-1]
+        out.update({
+            "valuation_date": v["date"],
+            "per": _f(v["per"]),                             # 本益比（虧損公司為 None）
+            "pbr": _f(v["pbr"]),                             # 股價淨值比
+            "dividend_yield_pct": _f(v["dividend_yield"]),   # 殖利率(%)
+        })
+        # 近一年本益比百分位：讓分析師知道估值相對自身歷史貴或便宜
+        pers = val.tail(240)["per"].dropna()
+        if len(pers) >= 60 and out["per"] is not None:
+            out["per_percentile_1y"] = round(float((pers <= v["per"]).mean()), 2)
+    return out
 
 
 def _f(v):

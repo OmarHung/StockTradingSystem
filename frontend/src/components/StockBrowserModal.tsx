@@ -186,6 +186,18 @@ export function StockBrowserModal({ onClose, onSelect }: {
                         <span style={{ color: "var(--text-dim)" }}>最新月營收 YoY</span>
                         <span className={`mono ${cls(d.fundamental.revenue_yoy)}`}>{fmt(d.fundamental.revenue_yoy * 100, 1)}%</span>
                       </div>)}
+                    {(d.fundamental?.per != null || d.fundamental?.pbr != null) && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
+                        <span style={{ color: "var(--text-dim)" }}>本益比 / 淨值比 / 殖利率</span>
+                        <span className="mono">
+                          {d.fundamental.per != null ? fmt(d.fundamental.per, 1) : "—"} / {d.fundamental.pbr != null ? fmt(d.fundamental.pbr, 2) : "—"} / {d.fundamental.dividend_yield_pct != null ? `${fmt(d.fundamental.dividend_yield_pct, 2)}%` : "—"}
+                        </span>
+                      </div>)}
+                    {d.fundamental?.per_percentile_1y != null && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
+                        <span style={{ color: "var(--text-dim)" }}>本益比近一年位階</span>
+                        <span className="mono">{fmt(d.fundamental.per_percentile_1y * 100, 0)}%</span>
+                      </div>)}
                   </div>
                 )}
               </div>

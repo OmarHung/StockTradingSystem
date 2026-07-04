@@ -70,13 +70,18 @@ def run_fundamental(stock_id: str, as_of: str) -> tuple[FundamentalReport | None
     if not feats:
         return None, feats
     system = (
-        "你是專業台股基本面分析師。根據提供的月營收數據做解讀，只能引用提供的數字。"
-        "輸出繁體中文。若引用月營收年增率，請在 cited_revenue_yoy 填入實算值（小數）。"
+        "你是專業台股基本面分析師。根據提供的月營收與估值數據做解讀，只能引用提供的數字。"
+        "輸出繁體中文。若引用月營收年增率，請在 cited_revenue_yoy 填入實算值（小數）；"
+        "若引用本益比，請在 cited_per 填入實算值。"
+        "估值欄位：per=本益比（虧損公司為 null）、pbr=股價淨值比、"
+        "dividend_yield_pct=殖利率(%)、per_percentile_1y=本益比近一年百分位"
+        "（0=一年最便宜，1=一年最貴）。"
     )
     prompt = (
-        f"股票代號 {stock_id}，基準日 {as_of}。月營收數據：\n"
+        f"股票代號 {stock_id}，基準日 {as_of}。月營收與估值數據：\n"
         f"{json.dumps(feats, ensure_ascii=False, indent=2)}\n\n"
-        "請判斷基本面方向、給出 score 與 confidence，並列出關鍵觀察與總結。"
+        "請綜合成長性（營收動能）與估值合理性（本益比/淨值比/殖利率及歷史位階），"
+        "判斷基本面方向、給出 score 與 confidence，並列出關鍵觀察與總結。"
     )
     rpt = llm.call_structured(
         model=_model(), system=system, user_prompt=prompt, schema=FundamentalReport,

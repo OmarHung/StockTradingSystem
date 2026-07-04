@@ -225,6 +225,16 @@ def get_month_revenue(stock_id: str) -> pd.DataFrame:
         )
 
 
+def get_valuation(stock_id: str) -> pd.DataFrame:
+    """每日估值（本益比/股價淨值比/殖利率%），日期升冪。"""
+    with db.connect(_db_path()) as conn:
+        return db.read_sql(
+            conn,
+            "SELECT * FROM valuation WHERE stock_id=? ORDER BY date",
+            (stock_id,),
+        )
+
+
 def get_prices_bulk(
     stock_ids: list[str], start: str, end: str, adjusted: bool = False
 ) -> pd.DataFrame:
@@ -348,7 +358,8 @@ def stock_detail(stock_id: str) -> dict:
         # 各資料集覆蓋範圍
         cov = {}
         for table, label in (("price_daily", "股價日K"), ("institutional", "三大法人"),
-                             ("margin", "融資融券"), ("dividend", "除權息")):
+                             ("margin", "融資融券"), ("dividend", "除權息"),
+                             ("valuation", "估值(PER/PBR/殖利率)")):
             r = db.read_sql(conn, f"SELECT COUNT(*) n, MIN(date) lo, MAX(date) hi "
                                   f"FROM {table} WHERE stock_id=?", (stock_id,)).iloc[0]
             cov[table] = {"label": label, "rows": int(r["n"]), "from": r["lo"], "to": r["hi"]}
@@ -405,6 +416,7 @@ _DATASET_META = {
     "margin":        {"label": "融資融券",       "desc": "散戶槓桿與軋空訊號（籌碼分析）"},
     "month_revenue": {"label": "月營收",         "desc": "每月10日前公告（基本面分析）"},
     "dividend":      {"label": "除權息",         "desc": "還原價計算必需，缺了動能會失真"},
+    "valuation":     {"label": "估值指標",       "desc": "本益比/股價淨值比/殖利率（基本面分析）"},
 }
 # 月營收是月頻資料，新鮮度用「天」衡量而非交易日
 _MONTHLY = {"month_revenue"}

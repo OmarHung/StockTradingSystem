@@ -52,6 +52,9 @@ class FundamentalReport(BaseModel):
     cited_revenue_yoy: float | None = Field(
         default=None, description="你引用的『最新月營收年增率』(小數，如 0.15=15%)"
     )
+    cited_per: float | None = Field(
+        default=None, description="你引用的『本益比』實算值（如 18.5；未引用留空）"
+    )
     key_points: list[str]
     summary: str
 

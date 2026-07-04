@@ -401,6 +401,53 @@ def fetch_tpex_dividend(conn) -> int:
     return db.upsert_dataframe(conn, "dividend", pd.DataFrame(rows))
 
 
+# ---------- 每日估值指標（本益比/殖利率/股價淨值比）----------
+def fetch_twse_valuation(conn, date_iso: str) -> int:
+    """TWSE BWIBBU_d：上市全市場單日估值（歷史按日可查）。"""
+    ymd = date_iso.replace("-", "")
+    j = _get_json(f"https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU_d"
+                  f"?date={ymd}&selectType=ALL&response=json")
+    if j.get("stat") != "OK" or not j.get("data"):
+        return 0
+    fields = j["fields"]
+
+    def col(name_part: str) -> int:
+        for i, f in enumerate(fields):
+            if name_part in f:
+                return i
+        raise OfficialSourceError(f"BWIBBU_d 找不到欄位 {name_part}（欄位定義變更？）")
+
+    ci, yi, pi, bi = col("證券代號"), col("殖利率"), col("本益比"), col("股價淨值比")
+    rows = [{"stock_id": str(r[ci]).strip(), "date": date_iso,
+             "per": _fnum(r[pi]), "pbr": _fnum(r[bi]), "dividend_yield": _fnum(r[yi])}
+            for r in j["data"] if str(r[ci]).strip()]
+    return db.upsert_dataframe(conn, "valuation", pd.DataFrame(rows))
+
+
+def fetch_tpex_valuation(conn, date_iso: str) -> int:
+    """TPEx peQryDate：上櫃全市場單日估值（歷史按日可查）。"""
+    y, m, d = date_iso.split("-")
+    j = _get_json(f"https://www.tpex.org.tw/www/zh-tw/afterTrading/peQryDate"
+                  f"?date={y}/{m}/{d}&response=json")
+    tables = j.get("tables") or []
+    if not tables or not tables[0].get("data"):
+        return 0
+    t = tables[0]
+    fields = t.get("fields") or []
+
+    def col(name_part: str) -> int:
+        for i, f in enumerate(fields):
+            if name_part in f:
+                return i
+        raise OfficialSourceError(f"peQryDate 找不到欄位 {name_part}（欄位定義變更？）")
+
+    ci, pi, yi, bi = col("股票代號"), col("本益比"), col("殖利率"), col("股價淨值比")
+    rows = [{"stock_id": str(r[ci]).strip(), "date": date_iso,
+             "per": _fnum(r[pi]), "pbr": _fnum(r[bi]), "dividend_yield": _fnum(r[yi])}
+            for r in t["data"] if str(r[ci]).strip()]
+    return db.upsert_dataframe(conn, "valuation", pd.DataFrame(rows))
+
+
 def _any_date(s) -> str | None:
     """openapi 日期容錯：民國7碼'1150102' / 西元8碼'20260102' /
     含分隔符民國（交給 _roc_date）/ ISO 'YYYY-MM-DD' 皆可。"""
