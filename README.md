@@ -3,7 +3,7 @@
 「持續檢討、學習、優化」的台股全自動交易系統。架構融合
 [CryptoTrade](https://github.com/Xtra-Computing/CryptoTrade)（多 LLM 分析師 + 交易員 Agent + Reflection）
 與 [LLM_trader](https://github.com/qrak/LLM_trader)（向量記憶、輸出驗證層、Guard 風控）。
-完整規劃與缺口清單見 [`PLAN.md`](PLAN.md)。
+完整規劃與缺口清單見 [`PLAN.md`](PLAN.md)；**操作教學見 [`USAGE.md`](USAGE.md)（使用手冊）**。
 
 ## 系統能力（Phase 0–5 已完成）
 
