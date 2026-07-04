@@ -12,7 +12,13 @@ const STATUS_UI: Record<string, { icon: string; color: string }> = {
 export function DataModal({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<DataStatus | null>(null);
   const [mode, setMode] = useState("limit");
-  const [start, setStart] = useState("2020-01-01");
+  // 回補起始日預設 2 年前（夠算季線/動能/回測，全市場也補得動）
+  const twoYearsAgo = () => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 2);
+    return d.toISOString().slice(0, 10);
+  };
+  const [start, setStart] = useState(twoYearsAgo());
   const [stocks, setStocks] = useState("2330 2317 0050");
   const [limit, setLimit] = useState(50);
   const [force, setForce] = useState(false);
