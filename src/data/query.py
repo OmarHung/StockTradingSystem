@@ -122,21 +122,35 @@ def trading_calendar(start: str | None = None, end: str | None = None) -> list[s
 def quality_check(sample_limit: int = 20) -> dict:
     """對照交易日曆偵測缺日、檢查 OHLC 異常。回傳摘要 + 問題樣本。
 
-    缺日以「該檔自身資料範圍內」對照 TAIEX 交易日（上市前/下市後不算缺）。
+    缺日分兩類（關鍵區分，避免誤報）：
+    - 無成交/停牌日（正常）：該日全市場已成功抓過（sj_daily 有標記或該日
+      多數股票有資料），該股就是沒成交——冷門股/停牌常見，不是資料洞。
+    - 真缺日：該日不在任何已抓來源覆蓋內 → 需要回補。
     """
     cal = trading_calendar()
     result: dict = {"calendar_days": len(cal), "checked_stocks": 0,
                     "stocks_with_gaps": 0, "total_missing_days": 0,
+                    "no_trade_days": 0,
                     "ohlc_anomalies": 0, "gap_samples": [], "anomaly_samples": []}
     if not cal:
         result["error"] = "無 TAIEX 交易日曆，請先回補（指數已納入預設回補目標）"
         return result
-    cal_set = set(cal)
 
     with db.connect(_db_path()) as conn:
         stocks = db.read_sql(
             conn, "SELECT stock_id, MIN(date) AS lo, MAX(date) AS hi, COUNT(*) AS n "
                   "FROM price_daily WHERE stock_id NOT IN ('TAIEX','TPEx') GROUP BY stock_id")
+        per_stock_dates = db.read_sql(
+            conn, "SELECT stock_id, date FROM price_daily WHERE stock_id NOT IN ('TAIEX','TPEx')")
+        # 「全市場已覆蓋」的日子：shioaji 按日標記 ∪ 當日有半數以上股票有資料
+        sj_done = {r[0] for r in conn.execute(
+            "SELECT stock_id FROM fetch_log WHERE dataset='sj_daily'").fetchall()}
+        day_counts = db.read_sql(
+            conn, "SELECT date, COUNT(DISTINCT stock_id) AS c FROM price_daily "
+                  "WHERE stock_id NOT IN ('TAIEX','TPEx') GROUP BY date")
+        median_c = day_counts["c"].median() if not day_counts.empty else 0
+        busy_days = set(day_counts[day_counts["c"] >= median_c * 0.5]["date"])
+        covered = sj_done | busy_days
         # 全零價格列（無成交日）：查詢層已自動剔除，這裡僅供資訊
         zero_rows = db.read_sql(
             conn, "SELECT COUNT(*) AS c FROM price_daily WHERE close<=0 OR high<=0")
@@ -149,17 +163,22 @@ def quality_check(sample_limit: int = 20) -> dict:
         )
     result["zero_price_rows"] = int(zero_rows.iloc[0]["c"])
 
+    have_map = {sid: set(g["date"]) for sid, g in per_stock_dates.groupby("stock_id")}
     for r in stocks.itertuples():
-        expected = [d for d in cal if r.lo <= d <= r.hi]
-        missing = len(expected) - r.n
         result["checked_stocks"] += 1
-        if missing > 0:
+        have = have_map.get(r.stock_id, set())
+        missing = [d for d in cal if r.lo <= d <= r.hi and d not in have]
+        if not missing:
+            continue
+        real = [d for d in missing if d not in covered]     # 真缺日（來源沒抓過）
+        result["no_trade_days"] += len(missing) - len(real)  # 無成交/停牌（正常）
+        if real:
             result["stocks_with_gaps"] += 1
-            result["total_missing_days"] += missing
+            result["total_missing_days"] += len(real)
             if len(result["gap_samples"]) < sample_limit:
                 result["gap_samples"].append(
                     {"stock_id": r.stock_id, "range": f"{r.lo}~{r.hi}",
-                     "expected": len(expected), "actual": r.n, "missing": missing})
+                     "missing": len(real), "days": real[:5]})
 
     result["ohlc_anomalies"] = len(anomalies)
     result["anomaly_samples"] = anomalies.head(sample_limit).to_dict(orient="records")

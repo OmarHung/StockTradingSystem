@@ -241,7 +241,8 @@ export function DataModal({ onClose }: { onClose: () => void }) {
                   <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "var(--text-dim)" }}>
                     <span>交易日曆 <b style={{ color: "var(--text)" }}>{qc.calendar_days}</b> 天</span>
                     <span>檢查 <b style={{ color: "var(--text)" }}>{qc.checked_stocks}</b> 檔</span>
-                    <span>缺日股票 <b className={qc.stocks_with_gaps > 0 ? "up" : "down"}>{qc.stocks_with_gaps}</b> 檔（共 {qc.total_missing_days} 天）</span>
+                    <span>真缺日股票 <b className={qc.stocks_with_gaps > 0 ? "up" : "down"}>{qc.stocks_with_gaps}</b> 檔（共 {qc.total_missing_days} 天）</span>
+                  <span>無成交/停牌日(正常) <b style={{ color: "var(--text)" }}>{qc.no_trade_days ?? 0}</b></span>
                     <span>零價列(已自動剔除) <b style={{ color: "var(--text)" }}>{qc.zero_price_rows}</b></span>
                     <span>結構異常 <b className={qc.ohlc_anomalies > 0 ? "up" : "down"}>{qc.ohlc_anomalies}</b></span>
                   </div>
