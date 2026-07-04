@@ -12,7 +12,7 @@ const TFS = [
   { v: "M", label: "月" },
 ];
 
-/** K 線圖（lightweight-charts v5）。台股紅漲綠跌；還原價；日/週/月切換。 */
+/** K 線圖（lightweight-charts v5）。台股紅漲綠跌；還原/原始價切換；日/週/月切換。 */
 export function KChart({
   stockId, name, watched, onToggleWatch,
 }: {
@@ -21,6 +21,7 @@ export function KChart({
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [tf, setTf] = useState("D");
+  const [adjusted, setAdjusted] = useState(true);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -53,7 +54,7 @@ export function KChart({
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
     let cancelled = false;
-    api.price(stockId, 250, tf).then((d) => {
+    api.price(stockId, 250, tf, adjusted).then((d) => {
       if (cancelled) return;
       candle.setData(d.candles.map((c) => ({ ...c, time: c.time as Time })));
       vol.setData(d.volume.map((v) => ({ time: v.time as Time, value: v.value, color: v.color })));
@@ -61,13 +62,18 @@ export function KChart({
     });
 
     return () => { cancelled = true; chart.remove(); chartRef.current = null; };
-  }, [stockId, tf]);
+  }, [stockId, tf, adjusted]);
 
   return (
-    <Panel title={`K 線圖 · ${stockId}`} icon="📈" sub={`${name} · 還原價`}
+    <Panel title={`K 線圖 · ${stockId}`} icon="📈" sub={`${name} · ${adjusted ? "還原價" : "原始價"}`}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <StarButton active={watched} onToggle={onToggleWatch} size={17} />
+          <button className="btn" onClick={() => setAdjusted(!adjusted)}
+            title="還原價：把除權息造成的跳空調整回去，看真實報酬走勢；原始價：市場實際成交價"
+            style={adjusted ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}}>
+            {adjusted ? "還原" : "原始"}
+          </button>
           <div style={{ display: "flex", gap: 2 }}>
             {TFS.map((t) => (
               <button key={t.v} className="btn" onClick={() => setTf(t.v)}

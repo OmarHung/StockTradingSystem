@@ -72,8 +72,8 @@ export const api = {
   dataStatus: () => get<DataStatus>("/data-status"),
   stocks: () => get<{ stock_id: string; stock_name: string; industry_category: string }[]>("/stocks"),
   quote: (id: string) => get<Quote>(`/quote/${id}`),
-  price: (id: string, limit = 250, tf = "D") =>
-    get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}`),
+  price: (id: string, limit = 250, tf = "D", adjusted = true) =>
+    get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}&adjusted=${adjusted}`),
   indices: () => get<Quote[]>("/indices"),
   stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
   stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),
