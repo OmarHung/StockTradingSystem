@@ -6,6 +6,8 @@ interface Row {
   stock_id: string; name: string; industry: string; market: string;
   price_days: number; price_last: string | null;
   downloaded: boolean; disposition: boolean;
+  open: number | null; high: number | null; low: number | null;
+  close: number | null; change_pct: number | null;
 }
 
 const MAX_SHOW = 400;
@@ -49,6 +51,8 @@ export function StockBrowserModal({ onClose, onSelect }: {
     catch (e) { alert(String(e)); }
     finally { setDetailLoading(false); }
   };
+  const closeDetail = () => { setPicked(""); setDetail(null); };
+  const showDetail = picked !== "";
 
   const d = detail;
   return (
@@ -84,21 +88,35 @@ export function StockBrowserModal({ onClose, onSelect }: {
         </div>
 
         <div className="modal-body" style={{ display: "flex", gap: 12, padding: 12 }}>
-          {/* 列表 */}
-          <div style={{ flex: "1 1 55%", overflow: "auto", maxHeight: "62vh" }}>
+          {/* 列表（未點選詳情時滿版，欄位含開高低收/漲跌幅） */}
+          <div style={{ flex: showDetail ? "1 1 55%" : "1 1 100%", overflow: "auto", maxHeight: "62vh" }}>
             <table className="grid">
-              <thead><tr><th>代號</th><th>名稱</th><th>市場</th><th>產業</th><th>資料</th><th>狀態</th></tr></thead>
+              <thead><tr>
+                <th>代號</th><th>名稱</th>
+                <th style={{ textAlign: "right" }}>收盤</th>
+                <th style={{ textAlign: "right" }}>漲跌%</th>
+                <th style={{ textAlign: "right" }}>開</th>
+                <th style={{ textAlign: "right" }}>高</th>
+                <th style={{ textAlign: "right" }}>低</th>
+                {!showDetail && <th>市場</th>}
+                {!showDetail && <th>產業</th>}
+                <th>狀態</th>
+              </tr></thead>
               <tbody>
                 {filtered.slice(0, MAX_SHOW).map((r) => (
                   <tr key={r.stock_id} className={r.stock_id === picked ? "active" : ""}
                       onClick={() => pick(r.stock_id)} style={{ cursor: "pointer" }}>
                     <td><b>{r.stock_id}</b></td>
                     <td>{r.name}</td>
-                    <td style={{ fontSize: 11 }}>{r.market === "twse" ? "上市" : r.market === "tpex" ? "上櫃" : r.market}</td>
-                    <td style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.industry}</td>
-                    <td className="mono" style={{ fontSize: 11 }}>
-                      {r.downloaded ? `${r.price_days}天 ~${r.price_last}` : "—"}
+                    <td className="mono" style={{ textAlign: "right" }}>{r.close != null ? fmt(r.close) : "—"}</td>
+                    <td className={`mono ${r.change_pct != null ? cls(r.change_pct) : ""}`} style={{ textAlign: "right" }}>
+                      {r.change_pct != null ? `${r.change_pct > 0 ? "+" : ""}${fmt(r.change_pct)}%` : "—"}
                     </td>
+                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.open != null ? fmt(r.open) : "—"}</td>
+                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.high != null ? fmt(r.high) : "—"}</td>
+                    <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.low != null ? fmt(r.low) : "—"}</td>
+                    {!showDetail && <td style={{ fontSize: 11 }}>{r.market === "twse" ? "上市" : r.market === "tpex" ? "上櫃" : r.market}</td>}
+                    {!showDetail && <td style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.industry}</td>}
                     <td>
                       {r.disposition && <span className="tag" style={{ background: "rgba(255,67,61,0.15)", color: "var(--up)", marginRight: 3 }}>處置</span>}
                       {r.downloaded
@@ -107,7 +125,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     </td>
                   </tr>
                 ))}
-                {filtered.length === 0 && <tr><td colSpan={6} className="empty-hint">無符合條件的股票</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={10} className="empty-hint">無符合條件的股票</td></tr>}
               </tbody>
             </table>
             {filtered.length > MAX_SHOW && (
@@ -115,9 +133,9 @@ export function StockBrowserModal({ onClose, onSelect }: {
             )}
           </div>
 
-          {/* 詳細數據 */}
+          {/* 詳細數據（點選股票後才顯示） */}
+          {showDetail && (
           <div style={{ flex: "1 1 45%", overflow: "auto", maxHeight: "62vh" }}>
-            {!d && !detailLoading && <div className="empty-hint">← 點選股票查看詳細數據</div>}
             {detailLoading && <div className="spinner">載入中…</div>}
             {d && !detailLoading && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
@@ -129,6 +147,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
                   <div style={{ flex: 1 }} />
                   <button className="btn primary" style={{ fontSize: 11 }}
                     onClick={() => { onSelect(d.stock_id); onClose(); }}>📈 開啟K線</button>
+                  <button className="btn" style={{ fontSize: 11 }} onClick={closeDetail}>✕</button>
                 </div>
 
                 {d.disposition && (
@@ -210,6 +229,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -342,8 +342,28 @@ def stocks_overview() -> list[dict]:
         disp = {r[0] for r in conn.execute(
             "SELECT DISTINCT stock_id FROM disposition WHERE period_start<=? AND period_end>=?",
             (today, today))}
+        # 最新一日開高低收與漲跌幅（只掃近 10 天，避免全表窗函數）
+        quote = db.read_sql(conn, """
+            WITH recent AS (
+                SELECT stock_id, date, open, high, low, close,
+                       ROW_NUMBER() OVER (PARTITION BY stock_id ORDER BY date DESC) rn
+                FROM price_daily
+                WHERE date >= date((SELECT MAX(date) FROM price_daily), '-10 days')
+            )
+            SELECT a.stock_id, a.open, a.high, a.low, a.close,
+                   CASE WHEN b.close > 0 THEN (a.close / b.close - 1) * 100 END AS change_pct
+            FROM recent a
+            LEFT JOIN recent b ON b.stock_id = a.stock_id AND b.rn = 2
+            WHERE a.rn = 1
+        """)
+        qmap = {r.stock_id: r for r in quote.itertuples()}
+
+    def _fv(v):
+        return None if v is None or pd.isna(v) else round(float(v), 2)
+
     out = []
     for r in df.itertuples():
+        qr = qmap.get(r.stock_id)
         out.append({
             "stock_id": r.stock_id, "name": r.stock_name or "",
             "industry": r.industry_category or "（未分類）",
@@ -353,6 +373,11 @@ def stocks_overview() -> list[dict]:
             "price_last": r.price_last if isinstance(r.price_last, str) else None,
             "downloaded": int(r.price_days) > 0,
             "disposition": r.stock_id in disp,
+            "open": _fv(qr.open) if qr else None,
+            "high": _fv(qr.high) if qr else None,
+            "low": _fv(qr.low) if qr else None,
+            "close": _fv(qr.close) if qr else None,
+            "change_pct": _fv(qr.change_pct) if qr else None,
         })
     return out
 
