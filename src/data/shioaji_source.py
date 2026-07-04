@@ -98,3 +98,61 @@ def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
     for sid in df["stock_id"].unique():
         db.merge_range(conn, "price_daily", sid, date_str, date_str, now)
     return n
+
+
+def fetch_disposition(conn) -> int:
+    """處置股第二源：api.punish()（欄向量）。與 TWSE 官方名單雙源並用（upsert 去重）。"""
+    api = _login()
+    p = api.punish()
+    codes = list(getattr(p, "code", []) or [])
+    if not codes:
+        return 0
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    df = pd.DataFrame({
+        "stock_id": [str(c) for c in codes],
+        "market": "shioaji",
+        "name": "",
+        "reason": list(p.description),
+        "period_start": [d.isoformat() if hasattr(d, "isoformat") else str(d) for d in p.start_date],
+        "period_end": [d.isoformat() if hasattr(d, "isoformat") else str(d) for d in p.end_date],
+        "fetched_at": now,
+    })
+    df = df[df["stock_id"] != ""]
+    return db.upsert_dataframe(conn, "disposition", df)
+
+
+# 排行掃描器類型對照（供 API /scanner）
+# 注意：實測本版 shioaji 的 ascending 語義與文件相反——
+# ascending=True 才是「榜首在前」（台積電成交額登頂驗證），勿改回。
+_SCANNER_KINDS = {
+    "change_pct_up":   ("ChangePercentRank", True),   # 漲幅排行
+    "change_pct_down": ("ChangePercentRank", False),  # 跌幅排行
+    "amount":          ("AmountRank", True),          # 成交金額排行
+    "volume":          ("VolumeRank", True),          # 成交量排行
+}
+
+
+def get_scanners(kind: str, count: int = 20) -> list[dict]:
+    """即時排行（漲幅/跌幅/成交值/成交量）。回傳 list[dict] 供 API 直接輸出。"""
+    import shioaji as sj_mod
+
+    if kind not in _SCANNER_KINDS:
+        raise ValueError(f"未知排行類型 {kind}（可選：{','.join(_SCANNER_KINDS)}）")
+    type_name, ascending = _SCANNER_KINDS[kind]
+    api = _login()
+    st_enum = getattr(sj_mod, "ScannerType", None) or sj_mod.constant.ScannerType
+    scans = api.scanners(
+        scanner_type=getattr(st_enum, type_name),
+        ascending=ascending, count=count,
+    )
+    out = []
+    for s in scans or []:
+        out.append({
+            "code": s.code, "name": s.name, "close": s.close,
+            "change_price": s.change_price,
+            "change_pct": round(s.change_price / (s.close - s.change_price) * 100, 2)
+                          if (s.close - s.change_price) else 0.0,
+            "total_volume": s.total_volume, "total_amount": s.total_amount,
+            "date": s.date,
+        })
+    return out

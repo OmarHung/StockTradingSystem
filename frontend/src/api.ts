@@ -76,6 +76,8 @@ export const api = {
     get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}`),
   indices: () => get<Quote[]>("/indices"),
   qualityCheck: () => get<Record<string, any>>("/quality-check"),
+  scanner: (kind: string, count = 20) =>
+    get<Record<string, any>[]>(`/scanner?kind=${kind}&count=${count}`),
   disposition: (activeOn?: string) =>
     get<Record<string, any>[]>(`/disposition${activeOn ? `?active_on=${activeOn}` : ""}`),
   screener: (asOf: string, topN = 30) =>

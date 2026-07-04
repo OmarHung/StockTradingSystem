@@ -12,13 +12,15 @@ import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { BrainPanel } from "./components/BrainPanel";
+import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { DataModal } from "./components/DataModal";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
 // 資料狀態改為頂部按鈕開窗（同設定），騰出版面給大腦活動。
 const LAYOUT: Layout = [
-  { i: "watchlist", x: 0, y: 0, w: 2, h: 12, minW: 2 },
+  { i: "watchlist", x: 0, y: 0, w: 2, h: 7, minW: 2 },
+  { i: "ranking", x: 0, y: 7, w: 2, h: 5, minW: 2 },
   { i: "kchart", x: 2, y: 0, w: 6, h: 7, minH: 4 },
   { i: "screener", x: 8, y: 0, w: 4, h: 7 },
   { i: "report", x: 2, y: 7, w: 6, h: 5 },
@@ -80,6 +82,7 @@ export default function App() {
           </div>
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
           <div key="backtest"><BacktestPanel /></div>
+          <div key="ranking"><RankingPanel onSelect={setSelected} /></div>
           <div key="brain"><BrainPanel /></div>
         </GridLayout>
       </div>

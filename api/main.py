@@ -354,3 +354,15 @@ def indices():
 def disposition(active_on: str | None = None):
     """處置股名單（active_on 給日期則只回傳仍在處置期間者）。"""
     return _records(q.list_disposition(active_on))
+
+
+@app.get("/api/scanner")
+def scanner(kind: str = "change_pct_up", count: int = 20):
+    """即時排行（shioaji scanners）：change_pct_up/change_pct_down/amount/volume。"""
+    from src.data import shioaji_source
+    if not shioaji_source.available():
+        raise HTTPException(400, "排行需要 shioaji 金鑰（設定 → API 金鑰）")
+    try:
+        return shioaji_source.get_scanners(kind, count)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"排行查詢失敗：{e}")
