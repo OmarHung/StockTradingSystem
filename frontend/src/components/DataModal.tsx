@@ -27,6 +27,10 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const [prog, setProg] = useState<{ pass: string; current: number; total: number; stock_id: string; rows: number } | null>(null);
   const [qc, setQc] = useState<Record<string, any> | null>(null);
   const [qcLoading, setQcLoading] = useState(false);
+  // 中止流程狀態：idle → stopping（按下中止）→ stopped（確認 job 已死）
+  const [stopState, setStopState] = useState<"idle" | "stopping" | "stopped">("idle");
+  const stopRef = useRef<"idle" | "stopping" | "stopped">("idle");
+  const setStop = (v: "idle" | "stopping" | "stopped") => { stopRef.current = v; setStopState(v); };
   const poll = useRef<number | null>(null);
 
   const loadStatus = () => api.dataStatus().then(setStatus).catch(() => {});
@@ -36,7 +40,12 @@ export function DataModal({ onClose }: { onClose: () => void }) {
     poll.current = window.setInterval(async () => {
       const s = await api.backfillStatus();
       setRunning(s.running); setLog(s.log); setProg(s.progress);
-      if (!s.running) { clearInterval(poll.current!); poll.current = null; loadStatus(); }
+      if (!s.running) {
+        clearInterval(poll.current!); poll.current = null;
+        // 若是使用者按了中止而停，標記「已中止」；自然結束則維持 idle（由進度顯示 ✅完成）
+        if (stopRef.current === "stopping") setStop("stopped");
+        loadStatus();
+      }
     }, 1200);
   };
 
@@ -52,11 +61,16 @@ export function DataModal({ onClose }: { onClose: () => void }) {
 
   const start_ = async () => {
     try {
+      setStop("idle"); setProg(null);
       await api.backfillStart({ mode, start, stocks, limit, force });
       setRunning(true); startPolling();
     } catch (e) { alert(String(e)); }
   };
-  const stop_ = async () => { await api.backfillStop(); };
+  const stop_ = async () => {
+    setStop("stopping");                    // 立即回饋，不等下一輪輪詢
+    try { await api.backfillStop(); }
+    catch (e) { setStop("idle"); alert(String(e)); }
+  };
   const runQc = async () => {
     setQcLoading(true);
     try { setQc(await api.qualityCheck()); } catch (e) { alert(String(e)); }
@@ -140,11 +154,24 @@ export function DataModal({ onClose }: { onClose: () => void }) {
               <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} style={{ width: "auto" }} />強制重抓
             </label>
             <button className="btn primary" onClick={start_} disabled={running}>回補</button>
-            <button className="btn" onClick={stop_} disabled={!running}>中止</button>
-            <span style={{ fontSize: 11, color: running ? "var(--down)" : "var(--text-dim)" }}>
-              {running ? "🟢 執行中" : "⚪ 閒置"}
+            <button className="btn" onClick={stop_} disabled={!running || stopState === "stopping"}>
+              {stopState === "stopping" ? "中止中…" : "中止"}
+            </button>
+            <span style={{ fontSize: 11, color:
+              stopState === "stopping" ? "var(--warning)"
+              : running ? "var(--down)" : "var(--text-dim)" }}>
+              {stopState === "stopping" ? "🟡 中止中，等待程序結束…"
+                : running ? "🟢 執行中" : "⚪ 閒置"}
             </span>
           </div>
+
+          {/* 中止確認橫幅 */}
+          {stopState === "stopped" && (
+            <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 4, fontSize: 12,
+              background: "rgba(240,185,11,0.1)", border: "1px solid var(--warning)", color: "var(--warning)" }}>
+              ⏹ 回補已中止（進度已保存，再按「回補」會從缺口續補，不會重來）
+            </div>
+          )}
 
           {/* 逐檔進度 */}
           {prog && (running || prog.pass === "完成") && (

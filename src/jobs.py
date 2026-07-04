@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JOBS_DIR = ROOT / "logs" / "jobs"
 
+# 本程序啟動的 job handle（poll() 會正確 reap 子程序，避免殭屍誤判存活）
+_PROCS: dict[str, subprocess.Popen] = {}
+
 
 def _paths(name: str) -> tuple[Path, Path]:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,11 +40,21 @@ def start_job(name: str, args: list[str]) -> bool:
         stderr=subprocess.STDOUT,
         start_new_session=True,  # 與 WebUI 進程脫鉤，關頁面也不中斷
     )
+    _PROCS[name] = proc
     pid_path.write_text(str(proc.pid))
     return True
 
 
 def is_running(name: str) -> bool:
+    # 1) 我們自己啟動的：用 poll()（會 reap，殭屍不會誤判為存活）
+    proc = _PROCS.get(name)
+    if proc is not None:
+        if proc.poll() is not None:
+            _PROCS.pop(name, None)
+            return False
+        return True
+
+    # 2) 跨程序 fallback：讀 pid 檔
     _, pid_path = _paths(name)
     if not pid_path.exists():
         return False
@@ -51,9 +64,16 @@ def is_running(name: str) -> bool:
         return False
     try:
         os.kill(pid, 0)  # 不送訊號，只探測存活
-        return True
     except OSError:
         return False
+    # pid 存活但可能是殭屍（已死、父程序未 reap）→ 嘗試收屍確認
+    try:
+        wpid, _ = os.waitpid(pid, os.WNOHANG)
+        if wpid == pid:
+            return False  # 剛收掉的殭屍
+    except ChildProcessError:
+        pass  # 不是我們的子程序，無法 waitpid，維持存活判定
+    return True
 
 
 def stop_job(name: str) -> bool:
