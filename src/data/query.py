@@ -43,11 +43,16 @@ def get_price(
         df = _clean_price(db.read_sql(conn, sql, tuple(params)))
         if not adjusted or df.empty:
             return df
+        # 調整事件 = 除權息 ∪ 公司行動（分割/減資，跳空偵測器產生）
         div = db.read_sql(
             conn,
             "SELECT date, before_price, after_price FROM dividend "
-            "WHERE stock_id=? AND before_price>0 AND after_price>0 ORDER BY date",
-            (stock_id,),
+            "WHERE stock_id=? AND before_price>0 AND after_price>0 "
+            "UNION ALL "
+            "SELECT date, before_price, after_price FROM capital_change "
+            "WHERE stock_id=? AND before_price>0 AND after_price>0 "
+            "ORDER BY date",
+            (stock_id, stock_id),
         )
     return _apply_adjustment(df, div)
 
@@ -269,8 +274,11 @@ def get_prices_bulk(
             conn,
             f"SELECT stock_id, date, before_price, after_price FROM dividend "
             f"WHERE stock_id IN ({placeholders}) AND before_price>0 AND after_price>0 "
+            f"UNION ALL "
+            f"SELECT stock_id, date, before_price, after_price FROM capital_change "
+            f"WHERE stock_id IN ({placeholders}) AND before_price>0 AND after_price>0 "
             f"ORDER BY stock_id, date",
-            tuple(stock_ids),
+            tuple(stock_ids) * 2,
         )
     if div_all.empty:
         return df

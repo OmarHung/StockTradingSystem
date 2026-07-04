@@ -21,8 +21,12 @@ log = get_logger(__name__)
 
 
 def load_prices(stock_ids: list[str], start: str, end: str) -> dict[str, pd.DataFrame]:
-    """把多檔日 K 載入成 {stock_id: DataFrame}（供回測環境）。"""
-    bulk = q.get_prices_bulk(stock_ids, start, end)
+    """把多檔日 K 載入成 {stock_id: DataFrame}（供回測環境）。
+
+    一律用還原價：除權息/分割/減資的跳空不還原會把假跌幅算進報酬
+    （0050 一拆四曾讓 buy_and_hold 顯示 -43%）。
+    """
+    bulk = q.get_prices_bulk(stock_ids, start, end, adjusted=True)
     if bulk.empty:
         return {}
     return {sid: g.reset_index(drop=True) for sid, g in bulk.groupby("stock_id")}

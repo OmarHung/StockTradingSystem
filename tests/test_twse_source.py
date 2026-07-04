@@ -107,3 +107,27 @@ def test_fetch_dividend_forecast_both_markets(conn):
     assert r == ("2026-07-16", "息", 2.3)
     r = conn.execute("SELECT date, kind, cash_dividend FROM dividend_forecast WHERE stock_id='5483'").fetchone()
     assert r == ("2026-07-20", "除息", 7.0)
+
+
+def test_corporate_action_detector(conn):
+    from src.data import corporate_actions
+    import pandas as pd
+    from src.data import database as db2
+    # 15 天平穩 + 第 16 天 1拆4 跳空（-75%）；另一檔正常波動不觸發
+    rows = []
+    for i in range(15):
+        rows.append({"stock_id": "9998", "date": f"2026-01-{i+1:02d}", "open": 100, "high": 101,
+                     "low": 99, "close": 100 + i * 0.5, "volume": 1000})
+    rows.append({"stock_id": "9998", "date": "2026-01-16", "open": 26, "high": 27,
+                 "low": 25.5, "close": 26.6, "volume": 4000})
+    for i in range(16):
+        rows.append({"stock_id": "9997", "date": f"2026-01-{i+1:02d}", "open": 50, "high": 51,
+                     "low": 49, "close": 50 + (i % 3), "volume": 1000})
+    db2.upsert_dataframe(conn, "price_daily", pd.DataFrame(rows))
+    conn.commit()
+    n = corporate_actions.detect(conn)
+    assert n == 1
+    r = conn.execute("SELECT date, before_price, after_price, kind FROM capital_change "
+                     "WHERE stock_id='9998'").fetchone()
+    assert r[0] == "2026-01-16" and r[3] == "auto_split"
+    assert conn.execute("SELECT COUNT(*) FROM capital_change WHERE stock_id='9997'").fetchone()[0] == 0

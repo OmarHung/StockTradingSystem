@@ -89,6 +89,18 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, date)
         )
     """,
+    # 公司行動價格調整事件（分割/反分割/減資/面額變更；跳空偵測器自動生成）
+    # 台股漲跌幅 ±10% → |日報酬|>15% 且非除權息日 = 必為公司行動
+    "capital_change": """
+        CREATE TABLE IF NOT EXISTS capital_change (
+            stock_id     TEXT NOT NULL,
+            date         TEXT NOT NULL,   -- 事件日（新價格第一天）
+            before_price REAL,            -- 事件前收盤
+            after_price  REAL,            -- 事件日收盤
+            kind         TEXT,            -- auto_split / auto_reduction（偵測器標記）
+            PRIMARY KEY (stock_id, date)
+        )
+    """,
     # 除權息預告（TWSE TWT48U_ALL / TPEx prepost 快照；未來除權息日程）
     "dividend_forecast": """
         CREATE TABLE IF NOT EXISTS dividend_forecast (

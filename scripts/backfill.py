@@ -45,6 +45,9 @@ DATASET_LABELS = {
 
 # 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補
 INDEX_IDS = ["TAIEX", "TPEx"]
+# 基準 ETF（回測 buy_and_hold/ma_cross 基準）：股票池排除 ETF，但基準價格必須有——
+# 一律納入回補目標；shioaji 按日快照有 ETF（免額外呼叫），FinMind 也保留其價格備援
+BENCH_IDS = ["0050"]
 
 # 首次回補時，Pass 1「最新」先抓最近這麼多天（其餘留給 Pass 2 歷史）
 INITIAL_WINDOW_DAYS = 400
@@ -130,7 +133,8 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         if limit:
             targets = targets[:limit]
         # 大盤指數一律優先回補（交易日曆/市場濾網基準）
-        targets = INDEX_IDS + [t for t in targets if t not in INDEX_IDS]
+        targets = INDEX_IDS + BENCH_IDS + [t for t in targets
+                                           if t not in INDEX_IDS and t not in BENCH_IDS]
 
         total = len(targets)
         passes = [("最新", _newest_gap), ("歷史", _history_gap)]
@@ -149,6 +153,12 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         if sj_primary:
             log.info("股價日K 主源＝shioaji（FinMind 額度保留給籌碼/基本面資料）")
             _shioaji_price_backfill(conn, targets, default_start, end, force=force)
+        if "price_daily" in active or "dividend" in active:
+            # 公司行動偵測（分割/減資跳空 → 還原價事件），股價/除權息更新後執行
+            from src.data import corporate_actions
+            n_ca = corporate_actions.detect(conn)
+            if n_ca:
+                log.info("公司行動偵測：新增 %d 個價格調整事件（分割/減資）", n_ca)
 
         # 籌碼主源：TWSE/TPEx 官方（按交易日全市場，免額度）；除權息主源：TWT49U
         # 官方覆蓋完成的市場，FinMind 對應 dataset 自動跳過（降級為備援）
@@ -197,7 +207,8 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                         continue
                     # 股價主源=shioaji 時，個股價格不再走 FinMind（指數仍走 FinMind，
                     # 因 daily_quotes 不含 TAIEX/TPEx）
-                    if sj_primary and name == "price_daily" and sid not in INDEX_IDS:
+                    if (sj_primary and name == "price_daily"
+                            and sid not in INDEX_IDS and sid not in BENCH_IDS):
                         continue
                     # 官方源已覆蓋該市場的 dataset → FinMind 跳過（備援降級）
                     if name in official_skip and mkt_map.get(sid) in official_skip[name]:

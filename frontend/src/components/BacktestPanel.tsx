@@ -10,9 +10,17 @@ const STRATS = [
   { v: "ma_cross", label: "0050均線" },
 ];
 
-/** 回測面板：跑策略回測，畫權益曲線 + 顯示績效指標。 */
+/** 回測面板：跑策略回測（區間/資金/持倉數可調），畫權益曲線 + 顯示績效指標。 */
 export function BacktestPanel() {
   const [strategy, setStrategy] = useState("screener");
+  const twoYearsAgo = () => {
+    const d = new Date(); d.setFullYear(d.getFullYear() - 2);
+    return d.toISOString().slice(0, 10);
+  };
+  const [start, setStart] = useState(twoYearsAgo());
+  const [end, setEnd] = useState(new Date().toISOString().slice(0, 10));
+  const [cash, setCash] = useState(1_000_000);
+  const [maxPos, setMaxPos] = useState(10);
   const [res, setRes] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -21,9 +29,7 @@ export function BacktestPanel() {
   const run = async () => {
     setLoading(true);
     try {
-      setRes(await api.backtest({
-        strategy, start: "2022-06-01", end: "2025-06-30", cash: 1_000_000, max_positions: 10,
-      }));
+      setRes(await api.backtest({ strategy, start, end, cash, max_positions: maxPos }));
     } catch (e) { alert(String(e)); } finally { setLoading(false); }
   };
 
@@ -48,10 +54,21 @@ export function BacktestPanel() {
   return (
     <Panel title="策略回測" icon="🧪"
       right={
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
             {STRATS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
           </select>
+          <input type="date" value={start} onChange={(e) => setStart(e.target.value)}
+            title="回測起日" style={{ width: 118, fontSize: 11 }} />
+          <span style={{ color: "var(--text-dim)", fontSize: 11 }}>~</span>
+          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
+            title="回測迄日" style={{ width: 118, fontSize: 11 }} />
+          <input type="number" value={cash} step={100_000} min={100_000}
+            onChange={(e) => setCash(Number(e.target.value))}
+            title="初始資金（元）" style={{ width: 92, fontSize: 11 }} />
+          <input type="number" value={maxPos} min={1} max={30}
+            onChange={(e) => setMaxPos(Number(e.target.value))}
+            title="最大持倉檔數" style={{ width: 46, fontSize: 11 }} />
           <button className="btn primary" onClick={run} disabled={loading}>回測</button>
         </div>
       }>
