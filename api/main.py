@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 
 from pathlib import Path
@@ -42,6 +43,13 @@ app.add_middleware(
 )
 
 
+def _records(df):
+    """DataFrame → list[dict]，把 NaN/inf 轉成 null（JSON 合法）。"""
+    if df is None or df.empty:
+        return []
+    return json.loads(df.to_json(orient="records"))
+
+
 # ---------- 基礎 ----------
 @app.get("/api/health")
 def health():
@@ -56,14 +64,14 @@ def models(top_n: int = 5):
 
 @app.get("/api/data-status")
 def data_status():
-    return q.data_status().to_dict(orient="records")
+    return _records(q.data_status())
 
 
 @app.get("/api/stocks")
 def stocks():
     """股票清單（供自選清單/搜尋）。"""
     df = q.list_stocks()
-    return df.to_dict(orient="records")
+    return _records(df)
 
 
 # ---------- 行情 ----------
@@ -118,7 +126,7 @@ def screener(as_of: str, top_n: int | None = None):
         return []
     if top_n:
         ranked = ranked.head(top_n)
-    return ranked.to_dict(orient="records")
+    return _records(ranked)
 
 
 # ---------- 回測 ----------
@@ -143,7 +151,7 @@ def backtest(req: BacktestReq):
     return {
         "metrics": m,
         "equity_curve": [{"time": d, "value": float(v)} for d, v in ec.items()],
-        "trades": res.trades.to_dict(orient="records") if not res.trades.empty else [],
+        "trades": _records(res.trades),
     }
 
 

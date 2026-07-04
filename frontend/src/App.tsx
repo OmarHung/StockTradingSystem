@@ -11,19 +11,19 @@ import { KChart } from "./components/KChart";
 import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
 import { BacktestPanel } from "./components/BacktestPanel";
-import { DataPanel } from "./components/DataPanel";
 import { BrainPanel } from "./components/BrainPanel";
 import { SettingsModal } from "./components/SettingsModal";
+import { DataModal } from "./components/DataModal";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
+// 資料狀態改為頂部按鈕開窗（同設定），騰出版面給大腦活動。
 const LAYOUT: Layout = [
   { i: "watchlist", x: 0, y: 0, w: 2, h: 12, minW: 2 },
   { i: "kchart", x: 2, y: 0, w: 6, h: 7, minH: 4 },
   { i: "screener", x: 8, y: 0, w: 4, h: 7 },
   { i: "report", x: 2, y: 7, w: 6, h: 5 },
   { i: "backtest", x: 8, y: 7, w: 4, h: 5 },
-  { i: "data", x: 0, y: 12, w: 6, h: 6 },
-  { i: "brain", x: 6, y: 12, w: 6, h: 6 },
+  { i: "brain", x: 0, y: 12, w: 12, h: 5 },
 ];
 
 export default function App() {
@@ -31,6 +31,7 @@ export default function App() {
   const [name, setName] = useState("台積電");
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showData, setShowData] = useState(false);
 
   const { width, containerRef } = useContainerWidth();
 
@@ -40,8 +41,11 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <TopBar hasKey={hasKey} onOpenSettings={() => setShowSettings(true)} />
+      <TopBar hasKey={hasKey}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenData={() => setShowData(true)} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
+      {showData && <DataModal onClose={() => setShowData(false)} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <GridLayout
           className="layout"
@@ -55,7 +59,6 @@ export default function App() {
           <div key="screener"><ScreenerPanel onSelect={setSelected} /></div>
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
           <div key="backtest"><BacktestPanel /></div>
-          <div key="data"><DataPanel /></div>
           <div key="brain"><BrainPanel /></div>
         </GridLayout>
       </div>
