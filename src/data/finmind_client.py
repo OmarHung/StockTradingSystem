@@ -25,6 +25,10 @@ class FinMindError(RuntimeError):
     pass
 
 
+class FinMindQuotaExhausted(RuntimeError):
+    """HTTP 402：當日額度用罄。重試無意義，呼叫端應改用備援資料源。"""
+
+
 class FinMindClient:
     def __init__(
         self,
@@ -75,11 +79,12 @@ class FinMindClient:
 
             resp = self._session.get(self.base_url, params=params, timeout=30)
 
-            # 402 = 免費額度用罄；429 = 頻率限制 → 皆值得重試等待
-            if resp.status_code in (402, 429):
-                raise FinMindError(
-                    f"FinMind 額度/頻率限制（HTTP {resp.status_code}），稍後重試"
-                )
+            # 402 = 額度用罄：重試無意義，直接讓呼叫端切換備援源
+            if resp.status_code == 402:
+                raise FinMindQuotaExhausted("FinMind 額度用罄（HTTP 402）")
+            # 429 = 頻率限制：退避重試
+            if resp.status_code == 429:
+                raise FinMindError("FinMind 頻率限制（HTTP 429），稍後重試")
             resp.raise_for_status()
 
             payload = resp.json()

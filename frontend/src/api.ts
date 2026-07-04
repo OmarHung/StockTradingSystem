@@ -98,7 +98,7 @@ export const api = {
   getConfig: () => get<Record<string, any>>("/config"),
   updateConfig: (section: string, values: Record<string, unknown>) =>
     put<{ status: string }>("/config", { section, values }),
-  envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean }>("/env-status"),
+  envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean; shioaji_key: boolean }>("/env-status"),
   setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
   // 資料管理
   backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean }) =>

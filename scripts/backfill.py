@@ -23,7 +23,8 @@ import json
 from src.config import get_settings
 from src.data import database as db
 from src.data import fetchers
-from src.data.finmind_client import FinMindClient
+from src.data import shioaji_source
+from src.data.finmind_client import FinMindClient, FinMindQuotaExhausted
 from src.logging_setup import get_logger, setup_logging
 
 log = get_logger("backfill")
@@ -106,9 +107,14 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         log.info("開始回補 %d 檔，期間 %s ~ %s（%s）",
                  total, default_start, end, "強制重抓" if force else "最新優先")
         totals = {name: 0 for name in FETCHERS}
+        finmind_dead = False  # 402 額度用罄 → 停止所有 FinMind 拉取
 
         for pass_label, gap_fn in passes:
+            if finmind_dead:
+                break
             for i, sid in enumerate(targets):
+                if finmind_dead:
+                    break
                 rows_this = 0
                 for name, fn in FETCHERS.items():
                     # 指數只有價格資料，其餘 dataset 跳過（省 API 額度）
@@ -122,6 +128,10 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                         n = fn(client, conn, sid, seg[0], seg[1])
                         rows_this += n
                         totals[name] += n
+                    except FinMindQuotaExhausted:
+                        log.warning("FinMind 額度用罄（402），停止 FinMind 拉取")
+                        finmind_dead = True
+                        break
                     except Exception as e:  # noqa: BLE001 — 單檔失敗不中斷
                         log.error("回補 %s/%s 失敗：%s", name, sid, e)
                 conn.commit()
@@ -130,8 +140,56 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     "stock_id": sid, "rows": rows_this,
                 })
 
+        # FinMind 額度用罄 → 嘗試 shioaji 備援續補「股價日K」（按日全市場，額度效率高）
+        if finmind_dead:
+            if shioaji_source.available():
+                log.info("改用 shioaji 備援續補股價日K（按交易日、最新優先）")
+                _shioaji_price_backfill(conn, targets, default_start, end)
+            else:
+                log.warning(
+                    "shioaji 備援未設定（.env 需 SJ_API_KEY / SJ_SEC_KEY）。"
+                    "已停止回補，FinMind 額度重置後再續補即可（進度已保存）。"
+                )
+
     log.info("回補完成，各 dataset 寫入列數：%s", totals)
     _emit_progress({"pass": "完成", "current": total, "total": total, "stock_id": "", "rows": 0})
+
+
+def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str) -> None:
+    """用 shioaji daily_quotes 按「交易日」補股價缺口（最新優先，一次一天全市場）。"""
+    wanted = {t for t in targets if t not in INDEX_IDS}
+    if not wanted:
+        return
+    # 候選日期：TAIEX 交易日曆；沒有日曆就用平日
+    cal = [r[0] for r in conn.execute(
+        "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
+        (start, end)).fetchall()]
+    if not cal:
+        d0, d1 = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+        cal = [d.isoformat() for d in
+               (d1 - dt.timedelta(days=i) for i in range((d1 - d0).days + 1))
+               if d.weekday() < 5]
+
+    placeholders = ",".join("?" * len(wanted))
+    total = len(cal)
+    filled = 0
+    for i, day in enumerate(cal):  # 已是最新在前（最新優先）
+        have = conn.execute(
+            f"SELECT COUNT(DISTINCT stock_id) FROM price_daily "
+            f"WHERE date=? AND stock_id IN ({placeholders})",
+            (day, *wanted)).fetchone()[0]
+        if have >= len(wanted):
+            continue  # 該日已完整
+        try:
+            n = shioaji_source.fetch_daily_for_date(conn, day, wanted)
+            filled += n
+            conn.commit()
+        except Exception as e:  # noqa: BLE001 — 單日失敗不中斷
+            log.error("shioaji 補 %s 失敗：%s", day, e)
+            n = 0
+        _emit_progress({"pass": "備援(shioaji)", "current": i + 1, "total": total,
+                        "stock_id": day, "rows": n})
+    log.info("shioaji 備援補入 %d 列股價", filled)
 
 
 def main() -> None:

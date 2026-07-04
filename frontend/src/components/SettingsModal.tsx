@@ -143,9 +143,14 @@ function ModelRow({ label, value, models, onChange }: {
   );
 }
 
-function KeysTab({ env, onSaved }: { env: { finmind_token: boolean; anthropic_key: boolean } | null; onSaved: (k: string) => void }) {
+function KeysTab({ env, onSaved }: {
+  env: { finmind_token: boolean; anthropic_key: boolean; shioaji_key?: boolean } | null;
+  onSaved: (k: string) => void;
+}) {
   const [finmind, setFinmind] = useState("");
   const [anthropic, setAnthropic] = useState("");
+  const [sjKey, setSjKey] = useState("");
+  const [sjSec, setSjSec] = useState("");
   const save = async (key: string, value: string) => {
     if (!value.trim()) return;
     try { await api.setEnv(key, value); onSaved(key); }
@@ -165,6 +170,20 @@ function KeysTab({ env, onSaved }: { env: { finmind_token: boolean; anthropic_ke
         <button className="btn" onClick={() => save("ANTHROPIC_API_KEY", anthropic)}>存</button>
       </div>
       <div className="form-hint">LLM 分析師/交易員需要，取得於 console.anthropic.com</div>
+      <div className="form-row">
+        <label>永豐 shioaji Key {env?.shioaji_key ? "✅" : "⚠️未設"}</label>
+        <input type="password" placeholder="API Key（留空不變更）" value={sjKey} onChange={(e) => setSjKey(e.target.value)} />
+        <button className="btn" onClick={() => save("SJ_API_KEY", sjKey)}>存</button>
+      </div>
+      <div className="form-row">
+        <label>永豐 shioaji Secret</label>
+        <input type="password" placeholder="Secret Key（留空不變更）" value={sjSec} onChange={(e) => setSjSec(e.target.value)} />
+        <button className="btn" onClick={() => save("SJ_SEC_KEY", sjSec)}>存</button>
+      </div>
+      <div className="form-hint">
+        FinMind 額度用罄時的回補備援源（也是 Phase 5 模擬/實盤交易必需）。
+        取得：sinotrade.com.tw → Python API 管理頁申請 API Key/Secret
+      </div>
     </>
   );
 }

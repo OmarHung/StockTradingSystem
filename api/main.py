@@ -240,6 +240,7 @@ def env_status():
     return {
         "finmind_token": bool(os.getenv("FINMIND_TOKEN")),
         "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "shioaji_key": bool(os.getenv("SJ_API_KEY")) and bool(os.getenv("SJ_SEC_KEY")),
     }
 
 
@@ -248,7 +249,7 @@ class EnvUpdate(BaseModel):
     value: str
 
 
-_ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY"}
+_ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY", "SJ_API_KEY", "SJ_SEC_KEY"}
 
 
 @app.post("/api/set-env")

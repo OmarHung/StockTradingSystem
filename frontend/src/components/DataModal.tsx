@@ -11,7 +11,7 @@ const STATUS_UI: Record<string, { icon: string; color: string }> = {
 /** 資料狀態視窗：健康報告（覆蓋率/新鮮度/結論）+ 回補（逐檔進度）+ 品質檢查。 */
 export function DataModal({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<DataStatus | null>(null);
-  const [mode, setMode] = useState("limit");
+  const [mode, setMode] = useState("all");
   // 回補起始日預設 2 年前（夠算季線/動能/回測，全市場也補得動）
   const twoYearsAgo = () => {
     const d = new Date();
@@ -32,6 +32,13 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const stopRef = useRef<"idle" | "stopping" | "stopped">("idle");
   const setStop = (v: "idle" | "stopping" | "stopped") => { stopRef.current = v; setStopState(v); };
   const poll = useRef<number | null>(null);
+  // log 自動捲動：使用者停在底部時，新內容進來自動跟到底；往上捲則不打擾
+  const logRef = useRef<HTMLPreElement | null>(null);
+  const atBottom = useRef(true);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [log]);
 
   const loadStatus = () => api.dataStatus().then(setStatus).catch(() => {});
 
@@ -193,7 +200,12 @@ export function DataModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {log && <pre style={{ marginTop: 8, fontSize: 10, color: "var(--text-dim)", background: "#0d1119",
+          {log && <pre ref={logRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 12;
+            }}
+            style={{ marginTop: 8, fontSize: 10, color: "var(--text-dim)", background: "#0d1119",
             padding: 8, borderRadius: 4, maxHeight: 100, overflow: "auto", whiteSpace: "pre-wrap" }}>{log}</pre>}
 
           {/* 品質檢查報告 */}
