@@ -67,7 +67,10 @@ export default function App() {
         onOpenBrowser={() => setShowBrowser(true)}
         onOpenBacktest={() => setShowBacktest(true)} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
-      {showBacktest && <BacktestModal onClose={() => setShowBacktest(false)} />}
+      {/* 回測視窗常駐掛載（display 切換）：關閉不重置參數/結果/進行中的輪詢 */}
+      <div style={{ display: showBacktest ? "contents" : "none" }}>
+        <BacktestModal onClose={() => setShowBacktest(false)} />
+      </div>
       {showData && <DataModal onClose={() => setShowData(false)} />}
       {showBrowser && <StockBrowserModal onClose={() => setShowBrowser(false)} onSelect={setSelected} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>

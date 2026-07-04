@@ -23,14 +23,34 @@ function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
   const [maxPos, setMaxPos] = useState(10);
   const [res, setRes] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [log, setLog] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const logRef = useRef<HTMLPreElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  useEffect(() => stopPoll, []);
+  // log 更新時自動捲到底
+  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [log]);
 
   const run = async () => {
-    setLoading(true);
+    setLoading(true); setRes(null); setLog("");
     try {
-      setRes(await api.backtest({ strategy, start, end, cash, max_positions: maxPos }));
-    } catch (e) { alert(String(e)); } finally { setLoading(false); }
+      await api.backtestStart({ strategy, start, end, cash, max_positions: maxPos });
+    } catch (e) { alert(String(e)); setLoading(false); return; }
+    stopPoll();
+    pollRef.current = setInterval(async () => {
+      try {
+        const st = await api.backtestStatus();
+        setLog(st.log || "");
+        if (!st.running) {
+          stopPoll(); setLoading(false);
+          if (st.result) setRes(st.result);
+          else alert("回測結束但無結果，請檢查 log");
+        }
+      } catch { /* 短暫網路錯誤，下輪重試 */ }
+    }, 1200);
   };
 
   useEffect(() => {
@@ -75,7 +95,14 @@ function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
           style={{ width: 46, fontSize: 11 }} />
         <button className="btn primary" onClick={run} disabled={loading}>回測</button>
       </div>
-      {loading && <div className="spinner">回測中…</div>}
+      {(loading || (log && !res)) && (
+        <div style={{ padding: "4px 8px" }}>
+          {loading && <div className="spinner" style={{ padding: 4 }}>回測中…</div>}
+          <pre ref={logRef} style={{ fontSize: 10, color: "var(--text-dim)", background: "#0a0d14",
+            borderRadius: 4, padding: 8, margin: 0, whiteSpace: "pre-wrap",
+            maxHeight: 160, overflow: "auto" }}>{log || "啟動中…"}</pre>
+        </div>
+      )}
       {m && (
         <div style={{ display: "flex", gap: 4, padding: "4px 6px", flexWrap: "wrap" }}>
           {[

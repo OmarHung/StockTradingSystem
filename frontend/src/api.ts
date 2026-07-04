@@ -98,6 +98,10 @@ export const api = {
   watchlistRemove: (id: string) => del<string[]>(`/watchlist/${id}`),
   backtest: (body: { strategy: string; start: string; end: string; cash: number; max_positions: number }) =>
     post<BacktestResult>("/backtest", body),
+  backtestStart: (body: { strategy: string; start: string; end: string; cash: number; max_positions: number }) =>
+    post<{ started: boolean }>("/backtest/start", body),
+  backtestStatus: () =>
+    get<{ running: boolean; log: string; result: BacktestResult | null }>("/backtest/status"),
   analyze: (asOf: string, topN: number) =>
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),

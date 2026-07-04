@@ -207,6 +207,39 @@ class BacktestReq(BaseModel):
     max_positions: int = 10
 
 
+_BT_JOB = "backtest"
+_BT_RESULT = Path("logs/jobs/backtest_result.json")
+
+
+@app.post("/api/backtest/start")
+def backtest_start(req: BacktestReq):
+    """背景執行回測（jobs.py 子行程）：可輪詢 log，結果寫檔供取回。"""
+    if jobs.is_running(_BT_JOB):
+        raise HTTPException(409, "回測已在執行中")
+    _BT_RESULT.unlink(missing_ok=True)
+    args = ["scripts.run_backtest", "--strategy", req.strategy,
+            "--start", req.start, "--end", req.end,
+            "--max-positions", str(req.max_positions),
+            "--json-out", str(_BT_RESULT)]
+    if req.cash:
+        args += ["--cash", str(req.cash)]
+    started = jobs.start_job(_BT_JOB, args)
+    return {"started": started}
+
+
+@app.get("/api/backtest/status")
+def backtest_status():
+    """回測進度：running + log 尾巴 + 完成後的完整結果。"""
+    running = jobs.is_running(_BT_JOB)
+    result = None
+    if not running and _BT_RESULT.exists():
+        try:
+            result = json.loads(_BT_RESULT.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
+    return {"running": running, "log": jobs.read_log(_BT_JOB, tail=40), "result": result}
+
+
 @app.post("/api/backtest")
 def backtest(req: BacktestReq):
     try:
