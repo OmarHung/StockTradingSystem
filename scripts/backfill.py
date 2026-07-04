@@ -81,15 +81,23 @@ def _emit_progress(payload: dict) -> None:
 
 def backfill(stocks: list[str] | None, start: str | None, end: str | None,
              limit: int | None, force: bool = False,
-             datasets: list[str] | None = None) -> None:
+             datasets: list[str] | None = None,
+             auto_wait: bool = False) -> None:
     cfg = get_settings()
     setup_logging(cfg.log_level, cfg.log_dir)
     db.init_db(cfg.db_path)
 
     fm = cfg.finmind
+
+    def _on_quota_wait(resume_at: str) -> None:
+        # 讓 WebUI 進度顯示「等待額度中，HH:MM 恢復」
+        _emit_progress({"pass": "等待額度", "current": 0, "total": 0,
+                        "stock_id": resume_at, "rows": 0})
+
     client = FinMindClient(
         base_url=fm["base_url"], token=cfg.finmind_token,
         request_interval_sec=fm["request_interval_sec"], max_retries=fm["max_retries"],
+        quota_wait=auto_wait, on_quota_wait=_on_quota_wait,
     )
     default_start = start or cfg.backfill_start
     end = end or dt.date.today().isoformat()
@@ -248,9 +256,11 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="限制回補檔數")
     ap.add_argument("--force", action="store_true", help="忽略已補範圍，全期重抓")
     ap.add_argument("--datasets", help=f"逗號分隔的資料類型（預設全部）：{','.join(FETCHERS)}")
+    ap.add_argument("--auto-wait", action="store_true",
+                    help="FinMind 額度用罄時自動等到下個整點續跑（背景/過夜更新用）")
     args = ap.parse_args()
     ds = [s.strip() for s in args.datasets.split(",")] if args.datasets else None
-    backfill(args.stocks, args.start, args.end, args.limit, args.force, ds)
+    backfill(args.stocks, args.start, args.end, args.limit, args.force, ds, args.auto_wait)
 
 
 if __name__ == "__main__":

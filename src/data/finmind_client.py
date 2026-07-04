@@ -36,13 +36,43 @@ class FinMindClient:
         token: str | None = None,
         request_interval_sec: float = 0.35,
         max_retries: int = 4,
+        quota_wait: bool = False,
+        on_quota_wait=None,
+        max_quota_waits: int = 30,
     ):
+        """quota_wait=True：402 額度用罄時自動等到下個整點（FinMind 每小時重置）再重試，
+        而非拋出例外——供背景/過夜自動更新使用。on_quota_wait(resume_at) 為等待通知回呼。"""
         self.base_url = base_url
         self.token = token
         self.request_interval_sec = request_interval_sec
         self.max_retries = max_retries
+        self.quota_wait = quota_wait
+        self.on_quota_wait = on_quota_wait
+        self.max_quota_waits = max_quota_waits
+        self._quota_waits = 0
         self._last_request_ts = 0.0
         self._session = requests.Session()
+
+    def _wait_for_quota_reset(self) -> None:
+        """睡到下個整點 + 90 秒緩衝（FinMind 額度以小時為單位重置）。"""
+        import datetime as dt
+
+        self._quota_waits += 1
+        if self._quota_waits > self.max_quota_waits:
+            raise FinMindQuotaExhausted(
+                f"已等待額度重置 {self.max_quota_waits} 次仍用罄，放棄（明日再續）")
+        now = dt.datetime.now()
+        resume = (now.replace(minute=0, second=0, microsecond=0)
+                  + dt.timedelta(hours=1, seconds=90))
+        wait_sec = max((resume - now).total_seconds(), 60)
+        log.warning("FinMind 額度用罄，等待至 %s 自動續跑（第 %d 次等待）",
+                    resume.strftime("%H:%M:%S"), self._quota_waits)
+        if self.on_quota_wait:
+            try:
+                self.on_quota_wait(resume.strftime("%Y-%m-%d %H:%M:%S"))
+            except Exception:  # noqa: BLE001
+                pass
+        time.sleep(wait_sec)
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_ts
@@ -94,4 +124,11 @@ class FinMindClient:
             data = payload.get("data", [])
             return pd.DataFrame(data)
 
-        return _call()
+        # quota_wait 模式：402 時等到額度重置自動續跑（背景/過夜更新用）
+        while True:
+            try:
+                return _call()
+            except FinMindQuotaExhausted:
+                if not self.quota_wait:
+                    raise
+                self._wait_for_quota_reset()

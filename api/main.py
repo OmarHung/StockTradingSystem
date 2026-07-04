@@ -409,6 +409,7 @@ class BackfillReq(BaseModel):
     limit: int | None = 50
     force: bool = False
     datasets: list[str] | None = None   # 資料類型子集（None=全部）
+    auto_wait: bool = True              # 402 額度用罄自動等下個整點續跑
 
 
 @app.post("/api/backfill/start")
@@ -424,6 +425,8 @@ def backfill_start(req: BackfillReq):
         args += ["--force"]
     if req.datasets:
         args += ["--datasets", ",".join(req.datasets)]
+    if req.auto_wait:
+        args += ["--auto-wait"]
     started = jobs.start_job(_BACKFILL_JOB, args)
     return {"started": started, "running": jobs.is_running(_BACKFILL_JOB), "cmd": " ".join(args)}
 

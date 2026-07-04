@@ -117,7 +117,7 @@ export const api = {
   memoryExperiences: (limit = 30) => get<Record<string, any>[]>(`/memory/experiences?limit=${limit}`),
   reflectRun: () => post<Record<string, any>>("/reflect/run", {}),
   // 資料管理
-  backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean; datasets?: string[] }) =>
+  backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean; datasets?: string[]; auto_wait?: boolean }) =>
     post<{ started: boolean; running: boolean; cmd: string }>("/backfill/start", body),
   backfillStatus: () => get<{
     running: boolean;

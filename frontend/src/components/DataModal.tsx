@@ -22,6 +22,7 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const [stocks, setStocks] = useState("2330 2317 0050");
   const [limit, setLimit] = useState(50);
   const [force, setForce] = useState(false);
+  const [autoWait, setAutoWait] = useState(true);
   // 資料類型勾選（預設全選）
   const DATASETS = [
     { key: "price_daily", label: "股價" },
@@ -82,7 +83,7 @@ export function DataModal({ onClose }: { onClose: () => void }) {
       setStop("idle"); setProg(null);
       const picked = DATASETS.filter((d) => dsSel[d.key]).map((d) => d.key);
       if (picked.length === 0) { alert("請至少勾選一種資料類型"); return; }
-      await api.backfillStart({ mode, start, stocks, limit, force,
+      await api.backfillStart({ mode, start, stocks, limit, force, auto_wait: autoWait,
         datasets: picked.length === DATASETS.length ? undefined : picked });
       setRunning(true); startPolling();
     } catch (e) { alert(String(e)); }
@@ -184,6 +185,10 @@ export function DataModal({ onClose }: { onClose: () => void }) {
             <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: "var(--text-dim)" }}>
               <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} style={{ width: "auto" }} />強制重抓
             </label>
+            <label title="FinMind 額度用罄時自動等到下個整點續跑（可過夜連跑補完全市場）"
+              style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: "var(--text-dim)" }}>
+              <input type="checkbox" checked={autoWait} onChange={(e) => setAutoWait(e.target.checked)} style={{ width: "auto" }} />額度自動等待
+            </label>
             <button className="btn primary" onClick={start_} disabled={running}>回補</button>
             <button className="btn" onClick={stop_} disabled={!running || stopState === "stopping"}>
               {stopState === "stopping" ? "中止中…" : "中止"}
@@ -210,9 +215,12 @@ export function DataModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-dim)", marginBottom: 4 }}>
                 <span>
                   <span className="tag" style={{ background: "var(--accent-dim)", color: "#8ab4ff", marginRight: 6 }}>
-                    {prog.pass === "最新" ? "① 最新優先" : prog.pass === "歷史" ? "② 歷史回填" : prog.pass}
+                    {prog.pass === "最新" ? "① 最新優先" : prog.pass === "歷史" ? "② 歷史回填"
+                      : prog.pass === "等待額度" ? "⏸ 額度用罄・等待重置" : prog.pass}
                   </span>
-                  {prog.stock_id && <>回補中 <b style={{ color: "var(--text)" }}>{prog.stock_id}</b>（{prog.current}/{prog.total}）</>}
+                  {prog.pass === "等待額度"
+                    ? <>將於 <b style={{ color: "var(--warning)" }}>{prog.stock_id}</b> 自動續跑（FinMind 每小時重置額度）</>
+                    : prog.stock_id && <>回補中 <b style={{ color: "var(--text)" }}>{prog.stock_id}</b>（{prog.current}/{prog.total}）</>}
                   {prog.pass === "完成" && "✅ 全部完成"}
                 </span>
                 <span className="mono">{Math.round((prog.current / prog.total) * 100)}%</span>
