@@ -10,7 +10,7 @@ import { Watchlist } from "./components/Watchlist";
 import { KChart } from "./components/KChart";
 import { ScreenerPanel } from "./components/ScreenerPanel";
 import { ReportPanel } from "./components/ReportPanel";
-import { BacktestPanel, BacktestModal } from "./components/BacktestPanel";
+import { BacktestModal } from "./components/BacktestPanel";
 import { BrainPanel } from "./components/BrainPanel";
 import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
@@ -26,8 +26,7 @@ const LAYOUT: Layout = [
   { i: "ranking", x: 0, y: 7, w: 2, h: 5, minW: 2 },
   { i: "kchart", x: 2, y: 0, w: 6, h: 7, minH: 4 },
   { i: "screener", x: 8, y: 0, w: 4, h: 7 },
-  { i: "report", x: 2, y: 7, w: 6, h: 5 },
-  { i: "backtest", x: 8, y: 7, w: 4, h: 5 },
+  { i: "report", x: 2, y: 7, w: 10, h: 5 },
   { i: "portfolio", x: 0, y: 12, w: 12, h: 7 },
   { i: "brain", x: 0, y: 19, w: 7, h: 5 },
   { i: "memory", x: 7, y: 19, w: 5, h: 5 },
@@ -92,7 +91,6 @@ export default function App() {
               isWatched={isWatched} onToggleWatch={toggleWatch} />
           </div>
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
-          <div key="backtest"><BacktestPanel /></div>
           <div key="ranking"><RankingPanel onSelect={setSelected} /></div>
           <div key="portfolio"><PortfolioPanel onSelect={setSelected} /></div>
           <div key="brain"><BrainPanel /></div>

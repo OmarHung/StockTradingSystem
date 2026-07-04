@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, LineSeries, ColorType, type IChartApi, type Time } from "lightweight-charts";
 import { api, type BacktestResult } from "../api";
-import { Panel, fmt } from "./Panel";
+import { fmt } from "./Panel";
 
 const STRATS = [
   { v: "screener", label: "多因子選股" },
@@ -117,15 +117,6 @@ function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
         </details>
       )}
     </>
-  );
-}
-
-/** 主畫面 grid 面板版。 */
-export function BacktestPanel() {
-  return (
-    <Panel title="策略回測" icon="🧪">
-      <BacktestCore chartHeight={200} />
-    </Panel>
   );
 }
 
