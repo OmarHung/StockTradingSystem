@@ -433,6 +433,55 @@ def stock_detail(stock_id: str) -> dict:
     return detail
 
 
+def stock_series(stock_id: str) -> dict:
+    """單一股票的圖表時間序列（供股票詳情頁）。
+
+    price: 還原收盤近 250 日；foreign_net/trust_net: 法人日淨買近 120 日；
+    margin_balance: 融資餘額近 120 日；revenue: 月營收近 36 月（含 yoy）；
+    per: 本益比近 250 日。日期一律 'YYYY-MM-DD'（lightweight-charts time）。
+    """
+    out: dict = {"price": [], "foreign_net": [], "trust_net": [],
+                 "margin_balance": [], "revenue": [], "per": []}
+    px = get_price(stock_id, adjusted=True)
+    if not px.empty:
+        out["price"] = [{"time": r.date, "value": round(float(r.close), 2)}
+                        for r in px.tail(250).itertuples() if r.close]
+    with db.connect(_db_path()) as conn:
+        inst = db.read_sql(conn, """
+            SELECT date, name, (buy - sell) AS net FROM institutional
+            WHERE stock_id=? AND name IN ('Foreign_Investor','Investment_Trust')
+            ORDER BY date""", (stock_id,))
+        if not inst.empty:
+            for key, nm in (("foreign_net", "Foreign_Investor"), ("trust_net", "Investment_Trust")):
+                sub = inst[inst["name"] == nm].tail(120)
+                out[key] = [{"time": r.date, "value": int(r.net)} for r in sub.itertuples()]
+        mg = db.read_sql(conn, """
+            SELECT date, margin_purchase_balance AS bal FROM margin
+            WHERE stock_id=? ORDER BY date""", (stock_id,))
+        if not mg.empty:
+            out["margin_balance"] = [{"time": r.date, "value": int(r.bal or 0)}
+                                     for r in mg.tail(120).itertuples()]
+        rev = db.read_sql(conn, """
+            SELECT revenue_year AS y, revenue_month AS m, revenue FROM month_revenue
+            WHERE stock_id=? ORDER BY y, m""", (stock_id,))
+        if not rev.empty:
+            rows = list(rev.itertuples())
+            by_ym = {(r.y, r.m): float(r.revenue or 0) for r in rows}
+            for r in rows[-36:]:
+                prev = by_ym.get((r.y - 1, r.m))
+                out["revenue"].append({
+                    "time": f"{int(r.y):04d}-{int(r.m):02d}-01",
+                    "value": float(r.revenue or 0),
+                    "yoy": round(float(r.revenue) / prev - 1, 4) if prev and r.revenue else None,
+                })
+        val = db.read_sql(conn, "SELECT date, per FROM valuation WHERE stock_id=? ORDER BY date",
+                          (stock_id,))
+        if not val.empty:
+            out["per"] = [{"time": r.date, "value": round(float(r.per), 2)}
+                          for r in val.tail(250).itertuples() if r.per is not None and not pd.isna(r.per)]
+    return out
+
+
 def brain_log(limit: int = 100, as_of: str | None = None) -> pd.DataFrame:
     """讀取最近的 LLM 呼叫/驗證記錄（供大腦活動頁）。"""
     sql = "SELECT id, ts, as_of, stock_id, agent, model, prompt, response, note FROM brain_log"

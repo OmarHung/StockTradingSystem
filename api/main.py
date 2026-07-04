@@ -96,6 +96,12 @@ def stock_detail(stock_id: str):
     return q.stock_detail(stock_id)
 
 
+@app.get("/api/stocks/{stock_id}/series")
+def stock_series(stock_id: str):
+    """股票詳情頁圖表序列：還原價/法人淨買/融資餘額/月營收/本益比。"""
+    return q.stock_series(stock_id)
+
+
 # ---------- 行情 ----------
 @app.get("/api/price/{stock_id}")
 def price(stock_id: str, start: str | None = None, end: str | None = None,

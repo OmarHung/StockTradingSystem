@@ -77,6 +77,7 @@ export const api = {
   indices: () => get<Quote[]>("/indices"),
   stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
   stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),
+  stockSeries: (id: string) => get<Record<string, any>>(`/stocks/${id}/series`),
   qualityCheck: () => get<Record<string, any>>("/quality-check"),
   scanner: (kind: string, count = 20) =>
     get<Record<string, any>[]>(`/scanner?kind=${kind}&count=${count}`),

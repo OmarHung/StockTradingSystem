@@ -1,6 +1,52 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createChart, ColorType, LineSeries, HistogramSeries, type IChartApi, type Time } from "lightweight-charts";
 import { api } from "../api";
 import { fmt, cls } from "./Panel";
+
+type Pt = { time: string; value: number };
+
+/** 詳情頁小圖表：line 或 histogram（正紅負綠，台股慣例）。 */
+function MiniChart({ data, kind, color = "#2962ff", height = 160, volumeScale = false, signColor = true, title }: {
+  data: Pt[]; kind: "line" | "histogram"; color?: string; height?: number;
+  volumeScale?: boolean; signColor?: boolean; title: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+
+  useEffect(() => {
+    if (!ref.current || data.length === 0) return;
+    const chart = createChart(ref.current, {
+      layout: { background: { type: ColorType.Solid, color: "#0d1119" }, textColor: "#787b86", fontFamily: "SF Mono, monospace", fontSize: 10 },
+      grid: { vertLines: { color: "#1a1e2a" }, horzLines: { color: "#1a1e2a" } },
+      rightPriceScale: { borderColor: "#232838" },
+      timeScale: { borderColor: "#232838" },
+      autoSize: true,
+      height,
+    });
+    chartRef.current = chart;
+    const priceFormat = volumeScale ? { type: "volume" as const } : { type: "price" as const, precision: 2, minMove: 0.01 };
+    if (kind === "line") {
+      const s = chart.addSeries(LineSeries, { color, lineWidth: 2, priceFormat });
+      s.setData(data.map((p) => ({ time: p.time as Time, value: p.value })));
+    } else {
+      const s = chart.addSeries(HistogramSeries, { priceFormat });
+      s.setData(data.map((p) => ({
+        time: p.time as Time, value: p.value,
+        color: signColor ? (p.value >= 0 ? "#ff433d" : "#0ecb81") : color,
+      })));
+    }
+    chart.timeScale().fitContent();
+    return () => { chart.remove(); chartRef.current = null; };
+  }, [data, kind, color, height, volumeScale, signColor]);
+
+  if (data.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "4px 2px" }}>{title}</div>
+      <div ref={ref} style={{ width: "100%", height }} />
+    </div>
+  );
+}
 
 interface Row {
   stock_id: string; name: string; industry: string; market: string;
@@ -38,6 +84,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
   const [industry, setIndustry] = useState("all");
   const [status, setStatus] = useState("all");
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
+  const [series, setSeries] = useState<Record<string, Pt[]> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [picked, setPicked] = useState("");
   const [tab, setTab] = useState("overview");
@@ -63,12 +110,15 @@ export function StockBrowserModal({ onClose, onSelect }: {
   }, [rows, q, market, industry, status]);
 
   const pick = async (id: string) => {
-    setPicked(id); setDetailLoading(true); setTab("overview");
-    try { setDetail(await api.stockDetail(id)); }
+    setPicked(id); setDetailLoading(true); setTab("overview"); setSeries(null);
+    try {
+      const [dt, sr] = await Promise.all([api.stockDetail(id), api.stockSeries(id)]);
+      setDetail(dt); setSeries(sr as Record<string, Pt[]>);
+    }
     catch (e) { alert(String(e)); }
     finally { setDetailLoading(false); }
   };
-  const backToList = () => { setPicked(""); setDetail(null); };
+  const backToList = () => { setPicked(""); setDetail(null); setSeries(null); };
   const showDetail = picked !== "";
   const d = detail;
   const f = d?.fundamental ?? {};
@@ -213,6 +263,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
               <div style={{ maxHeight: "48vh", overflow: "auto", paddingTop: 4 }}>
                 {tab === "overview" && (
                   <div>
+                    {series?.price && <MiniChart data={series.price} kind="line" height={200} title="還原收盤走勢（近一年）" />}
                     <Item label="外資近5日淨買(股)" value={c.foreign_net_5d != null
                       ? <span className={cls(c.foreign_net_5d)}>{Number(c.foreign_net_5d).toLocaleString()}</span> : "—"} />
                     <Item label="投信近5日淨買(股)" value={c.trust_net_5d != null
@@ -232,6 +283,9 @@ export function StockBrowserModal({ onClose, onSelect }: {
 
                 {tab === "chips" && (
                   <div>
+                    {series?.foreign_net && <MiniChart data={series.foreign_net} kind="histogram" volumeScale title="外資日買賣超（股，紅買綠賣）" />}
+                    {series?.trust_net && <MiniChart data={series.trust_net} kind="histogram" volumeScale title="投信日買賣超（股）" />}
+                    {series?.margin_balance && <MiniChart data={series.margin_balance} kind="line" color="#f0b90b" volumeScale title="融資餘額（張）" />}
                     <Item label="外資近5日淨買(股)" value={c.foreign_net_5d != null
                       ? <span className={cls(c.foreign_net_5d)}>{Number(c.foreign_net_5d).toLocaleString()}</span> : "—"} />
                     <Item label="投信近5日淨買(股)" value={c.trust_net_5d != null
@@ -246,6 +300,8 @@ export function StockBrowserModal({ onClose, onSelect }: {
 
                 {tab === "fund" && (
                   <div>
+                    {series?.revenue && <MiniChart data={series.revenue} kind="histogram" volumeScale signColor={false} color="#2962ff" title="月營收（近三年，元）" />}
+                    {series?.per && series.per.length > 5 && <MiniChart data={series.per} kind="line" color="#26a69a" title="本益比走勢" />}
                     <Item label="最新月營收(元)" value={f.latest_revenue != null
                       ? Number(f.latest_revenue).toLocaleString() : "—"} />
                     <Item label="營收月份" value={f.latest_revenue_year != null
