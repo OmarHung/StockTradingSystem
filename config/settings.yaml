@@ -53,9 +53,9 @@ shioaji:
   environment: simulation          # simulation=模擬（預設） / production=正式（真金白銀，Phase 5 交易用）
 
 llm:
-  analyst_model: claude-sonnet-4-6
+  analyst_model: claude-opus-4-7
   trader_model: claude-sonnet-4-6
-  reflection_model: claude-sonnet-4-6
+  reflection_model: claude-opus-4-8
 
 # ---- 日誌 ----
 logging:

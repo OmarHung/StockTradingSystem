@@ -36,6 +36,10 @@ FETCHERS = {
     "month_revenue": fetchers.fetch_month_revenue,
     "dividend": fetchers.fetch_dividend,     # 除權息（還原價計算必需）
 }
+DATASET_LABELS = {
+    "price_daily": "股價日K", "institutional": "三大法人", "margin": "融資融券",
+    "month_revenue": "月營收", "dividend": "除權息",
+}
 
 # 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補
 INDEX_IDS = ["TAIEX", "TPEx"]
@@ -76,7 +80,8 @@ def _emit_progress(payload: dict) -> None:
 
 
 def backfill(stocks: list[str] | None, start: str | None, end: str | None,
-             limit: int | None, force: bool = False) -> None:
+             limit: int | None, force: bool = False,
+             datasets: list[str] | None = None) -> None:
     cfg = get_settings()
     setup_logging(cfg.log_level, cfg.log_dir)
     db.init_db(cfg.db_path)
@@ -89,9 +94,22 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
     default_start = start or cfg.backfill_start
     end = end or dt.date.today().isoformat()
 
+    # 要回補哪些資料類型（預設全部）
+    active = {k: v for k, v in FETCHERS.items() if not datasets or k in datasets}
+    if not active:
+        log.error("無有效資料類型（可選：%s）", ",".join(FETCHERS))
+        return
+
+    finmind_dead = False  # 402 額度用罄 → 停止所有 FinMind 拉取
+
     with db.connect(cfg.db_path) as conn:
-        fetchers.fetch_stock_info(client, conn)
-        fetchers.fetch_disposition(conn)  # 官方處置股名單（全市場快照，免 token）
+        # 股票清單也走 FinMind——起手就 402 時不 crash，靠既有清單續跑
+        try:
+            fetchers.fetch_stock_info(client, conn)
+        except FinMindQuotaExhausted:
+            log.warning("FinMind 額度用罄（402），無法刷新股票清單，改用資料庫既有清單")
+            finmind_dead = True
+        fetchers.fetch_disposition(conn)  # 官方處置股名單（TWSE/TPEx，不受 FinMind 額度影響）
         targets = stocks if stocks else fetchers.select_universe(conn, cfg)
         if limit:
             targets = targets[:limit]
@@ -104,10 +122,10 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         if force:
             passes = [("全期", lambda f, l, s, e: (s, e))]
 
-        log.info("開始回補 %d 檔，期間 %s ~ %s（%s）",
-                 total, default_start, end, "強制重抓" if force else "最新優先")
-        totals = {name: 0 for name in FETCHERS}
-        finmind_dead = False  # 402 額度用罄 → 停止所有 FinMind 拉取
+        log.info("開始回補 %d 檔，期間 %s ~ %s（%s），資料類型：%s",
+                 total, default_start, end, "強制重抓" if force else "最新優先",
+                 "、".join(DATASET_LABELS[k] for k in active))
+        totals = {name: 0 for name in active}
 
         for pass_label, gap_fn in passes:
             if finmind_dead:
@@ -116,7 +134,7 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                 if finmind_dead:
                     break
                 rows_this = 0
-                for name, fn in FETCHERS.items():
+                for name, fn in active.items():
                     # 指數只有價格資料，其餘 dataset 跳過（省 API 額度）
                     if sid in INDEX_IDS and name != "price_daily":
                         continue
@@ -141,7 +159,7 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                 })
 
         # FinMind 額度用罄 → 嘗試 shioaji 備援續補「股價日K」（按日全市場，額度效率高）
-        if finmind_dead:
+        if finmind_dead and "price_daily" in active:
             if shioaji_source.available():
                 log.info("改用 shioaji 備援續補股價日K（按交易日、最新優先）")
                 _shioaji_price_backfill(conn, targets, default_start, end)
@@ -199,8 +217,10 @@ def main() -> None:
     ap.add_argument("--end", help="結束日 YYYY-MM-DD（預設今天）")
     ap.add_argument("--limit", type=int, help="限制回補檔數")
     ap.add_argument("--force", action="store_true", help="忽略已補範圍，全期重抓")
+    ap.add_argument("--datasets", help=f"逗號分隔的資料類型（預設全部）：{','.join(FETCHERS)}")
     args = ap.parse_args()
-    backfill(args.stocks, args.start, args.end, args.limit, args.force)
+    ds = [s.strip() for s in args.datasets.split(",")] if args.datasets else None
+    backfill(args.stocks, args.start, args.end, args.limit, args.force, ds)
 
 
 if __name__ == "__main__":

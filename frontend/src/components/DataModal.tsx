@@ -22,6 +22,17 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const [stocks, setStocks] = useState("2330 2317 0050");
   const [limit, setLimit] = useState(50);
   const [force, setForce] = useState(false);
+  // 資料類型勾選（預設全選）
+  const DATASETS = [
+    { key: "price_daily", label: "股價" },
+    { key: "institutional", label: "法人" },
+    { key: "margin", label: "融資券" },
+    { key: "month_revenue", label: "月營收" },
+    { key: "dividend", label: "除權息" },
+  ];
+  const [dsSel, setDsSel] = useState<Record<string, boolean>>(
+    Object.fromEntries(DATASETS.map((d) => [d.key, true])));
+  const toggleDs = (k: string) => setDsSel((s) => ({ ...s, [k]: !s[k] }));
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState("");
   const [prog, setProg] = useState<{ pass: string; current: number; total: number; stock_id: string; rows: number } | null>(null);
@@ -69,7 +80,10 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const start_ = async () => {
     try {
       setStop("idle"); setProg(null);
-      await api.backfillStart({ mode, start, stocks, limit, force });
+      const picked = DATASETS.filter((d) => dsSel[d.key]).map((d) => d.key);
+      if (picked.length === 0) { alert("請至少勾選一種資料類型"); return; }
+      await api.backfillStart({ mode, start, stocks, limit, force,
+        datasets: picked.length === DATASETS.length ? undefined : picked });
       setRunning(true); startPolling();
     } catch (e) { alert(String(e)); }
   };
@@ -157,6 +171,16 @@ export function DataModal({ onClose }: { onClose: () => void }) {
             <input value={start} onChange={(e) => setStart(e.target.value)} style={{ width: 100 }} title="起始日" />
             {mode === "stocks" && <input value={stocks} onChange={(e) => setStocks(e.target.value)} placeholder="2330 2317" style={{ width: 140 }} />}
             {mode === "limit" && <input type="number" value={limit} onChange={(e) => setLimit(+e.target.value)} style={{ width: 64 }} />}
+            <span style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 4px",
+              borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>
+              {DATASETS.map((d) => (
+                <label key={d.key} style={{ display: "flex", gap: 3, alignItems: "center",
+                  fontSize: 11, color: dsSel[d.key] ? "var(--text)" : "var(--text-dim)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={dsSel[d.key]} onChange={() => toggleDs(d.key)} style={{ width: "auto" }} />
+                  {d.label}
+                </label>
+              ))}
+            </span>
             <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: "var(--text-dim)" }}>
               <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} style={{ width: "auto" }} />強制重抓
             </label>

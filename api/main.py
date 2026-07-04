@@ -278,6 +278,7 @@ class BackfillReq(BaseModel):
     stocks: str | None = None    # 空格分隔
     limit: int | None = 50
     force: bool = False
+    datasets: list[str] | None = None   # 資料類型子集（None=全部）
 
 
 @app.post("/api/backfill/start")
@@ -291,6 +292,8 @@ def backfill_start(req: BackfillReq):
         args += ["--limit", str(int(req.limit))]
     if req.force:
         args += ["--force"]
+    if req.datasets:
+        args += ["--datasets", ",".join(req.datasets)]
     started = jobs.start_job(_BACKFILL_JOB, args)
     return {"started": started, "running": jobs.is_running(_BACKFILL_JOB), "cmd": " ".join(args)}
 
