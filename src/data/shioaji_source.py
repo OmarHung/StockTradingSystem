@@ -62,52 +62,36 @@ def _login():
     return _api
 
 
-# daily_quotes 欄位名對照（shioaji 回傳欄位大小寫歷經版本差異，防禦性對映）
-_COL_ALIASES = {
-    "code": ["code", "Code"],
-    "open": ["open", "Open"],
-    "high": ["high", "High"],
-    "low": ["low", "Low"],
-    "close": ["close", "Close"],
-    "volume": ["volume", "Volume", "total_volume", "TotalVolume"],
-    "amount": ["amount", "Amount", "total_amount", "TotalAmount"],
-}
-
-
-def _pick(d: dict, keys: list[str]):
-    for k in keys:
-        if k in d and d[k] is not None:
-            return d[k]
-    return None
-
-
 def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
-    """抓某交易日全市場行情，篩 wanted_ids 寫入 price_daily。回傳寫入列數。"""
+    """抓某交易日全市場行情，篩 wanted_ids 寫入 price_daily。回傳寫入列數。
+
+    DailyQuotes 是「欄向量」結構（column-oriented）：.Code/.Open/.Close 各是
+    一條等長陣列，不能按列疊代（d[0] 會炸 'int' object is not 'str'）。
+    量能單位已是「股」（實測與 FinMind 完全一致，勿再換算）。
+    """
     api = _login()
     day = dt.date.fromisoformat(date_str)
-    quotes = api.daily_quotes(date=day)
-
-    rows = []
-    for item in quotes or []:
-        d = dict(item) if not isinstance(item, dict) else item
-        code = str(_pick(d, _COL_ALIASES["code"]) or "")
-        if code not in wanted_ids:
-            continue
-        close = _pick(d, _COL_ALIASES["close"])
-        if close is None:
-            continue
-        rows.append({
-            "stock_id": code, "date": date_str,
-            "open": _pick(d, _COL_ALIASES["open"]),
-            "high": _pick(d, _COL_ALIASES["high"]),
-            "low": _pick(d, _COL_ALIASES["low"]),
-            "close": close,
-            "volume": _pick(d, _COL_ALIASES["volume"]),
-            "trading_money": _pick(d, _COL_ALIASES["amount"]),
-        })
-    if not rows:
+    q = api.daily_quotes(date=day)
+    codes = list(getattr(q, "Code", []) or [])
+    if not codes:
         return 0
-    df = pd.DataFrame(rows)
+
+    df = pd.DataFrame({
+        "stock_id": [str(c) for c in codes],
+        "open": list(q.Open),
+        "high": list(q.High),
+        "low": list(q.Low),
+        "close": list(q.Close),
+        "volume": list(q.Volume),
+        "trading_money": list(q.Amount),
+        "trading_turnover": list(q.Transaction),
+    })
+    df = df[df["stock_id"].isin(wanted_ids) & (df["close"].astype(float) > 0)].copy()
+    if df.empty:
+        return 0
+    df["date"] = date_str
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype("int64")
+
     n = db.upsert_dataframe(conn, "price_daily", df)
     # 更新每檔 fetch_log 已補範圍
     now = dt.datetime.now().isoformat(timespec="seconds")
