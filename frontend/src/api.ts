@@ -23,6 +23,11 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
+async function del<T>(path: string): Promise<T> {
+  const r = await fetch(`/api${path}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
 
 export interface Quote {
   stock_id: string; name: string; last: number | null;
@@ -33,6 +38,9 @@ export interface Vol { time: string; value: number; color: string; }
 export interface ScreenerRow {
   rank: number; stock_id: string; stock_name: string; industry_category: string;
   score: number; momentum_20: number; chips_net_buy: number; revenue_yoy: number | null;
+}
+export interface SavedScreener {
+  as_of: string; rows: ScreenerRow[]; top_n: number | null; created_at: string;
 }
 export interface DatasetStatus {
   table: string; label: string; desc: string;
@@ -72,6 +80,13 @@ export const api = {
     get<Record<string, any>[]>(`/disposition${activeOn ? `?active_on=${activeOn}` : ""}`),
   screener: (asOf: string, topN = 30) =>
     get<ScreenerRow[]>(`/screener?as_of=${asOf}&top_n=${topN}`),
+  screenerSaved: (asOf: string) =>
+    get<SavedScreener | null>(`/screener/saved?as_of=${asOf}`),
+  screenerHistory: () =>
+    get<{ as_of: string; created_at: string }[]>("/screener/history"),
+  watchlist: () => get<string[]>("/watchlist"),
+  watchlistAdd: (id: string) => post<string[]>(`/watchlist/${id}`, {}),
+  watchlistRemove: (id: string) => del<string[]>(`/watchlist/${id}`),
   backtest: (body: { strategy: string; start: string; end: string; cash: number; max_positions: number }) =>
     post<BacktestResult>("/backtest", body),
   analyze: (asOf: string, topN: number) =>
@@ -86,7 +101,6 @@ export const api = {
   envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean }>("/env-status"),
   setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
   // 資料管理
-  initDb: () => post<{ status: string; tables: string[] }>("/init-db", {}),
   backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean }) =>
     post<{ started: boolean; running: boolean; cmd: string }>("/backfill/start", body),
   backfillStatus: () => get<{

@@ -6,6 +6,7 @@ import { Panel, fmt, cls } from "./Panel";
 export function ScreenerPanel({ onSelect }: { onSelect: (id: string) => void }) {
   const [asOf, setAsOf] = useState("");
   const [rows, setRows] = useState<ScreenerRow[]>([]);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // 預設帶入最新交易日
@@ -15,17 +16,38 @@ export function ScreenerPanel({ onSelect }: { onSelect: (id: string) => void }) 
       .catch(() => {});
   }, []);
 
+  // 切換日期時，載回該日已保存的選股結果（重整/重啟後也不遺失）
+  useEffect(() => {
+    if (!asOf) return;
+    let alive = true;
+    api.screenerSaved(asOf)
+      .then((saved) => {
+        if (!alive) return;
+        setRows(saved?.rows ?? []);
+        setSavedAt(saved?.created_at ?? null);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [asOf]);
+
   const run = async () => {
     setLoading(true);
-    try { setRows(await api.screener(asOf, 30)); }
-    catch (e) { alert(String(e)); }
+    try {
+      setRows(await api.screener(asOf, 30));
+      setSavedAt(new Date().toISOString());  // 後端已落庫，這裡即時反映
+    } catch (e) { alert(String(e)); }
     finally { setLoading(false); }
   };
 
   return (
     <Panel title="智慧選股" icon="🔍"
       right={
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {savedAt && (
+            <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
+              已保存 {savedAt.slice(0, 16).replace("T", " ")}
+            </span>
+          )}
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
           <button className="btn primary" onClick={run} disabled={loading || !asOf}>執行</button>
         </div>

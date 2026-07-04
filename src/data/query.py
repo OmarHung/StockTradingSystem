@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import datetime as dt
+import json
+
 import pandas as pd
 
 from src.config import get_settings
@@ -376,3 +379,84 @@ def data_status() -> dict:
 
     return {"latest_trading_day": latest_trading, "universe": universe,
             "datasets": datasets, "summary": summary}
+
+
+# ---------- 選股結果快照（重整/重啟後還原）----------
+_SCREENER_DDL = db.SCHEMA["screener_result"]
+
+
+def save_screener_result(as_of: str, rows: list[dict], top_n: int | None = None) -> None:
+    """保存某基準日的選股結果（同日期覆蓋）。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_SCREENER_DDL)  # 防禦性建表：舊 DB 未 init 也能用
+        conn.execute(
+            "INSERT OR REPLACE INTO screener_result (as_of, rows_json, top_n, created_at) "
+            "VALUES (?,?,?,?)",
+            (as_of, json.dumps(rows, ensure_ascii=False), top_n,
+             dt.datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def load_screener_result(as_of: str) -> dict | None:
+    """讀取某基準日已存的選股結果；無則回 None。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_SCREENER_DDL)
+        row = conn.execute(
+            "SELECT rows_json, top_n, created_at FROM screener_result WHERE as_of=?",
+            (as_of,),
+        ).fetchone()
+    if not row:
+        return None
+    return {"as_of": as_of, "rows": json.loads(row[0]),
+            "top_n": row[1], "created_at": row[2]}
+
+
+def list_screener_dates() -> list[dict]:
+    """已保存選股結果的日期清單（新到舊），供歷史選單。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_SCREENER_DDL)
+        rows = conn.execute(
+            "SELECT as_of, created_at FROM screener_result ORDER BY as_of DESC"
+        ).fetchall()
+    return [{"as_of": r[0], "created_at": r[1]} for r in rows]
+
+
+# ---------- 自選清單（重整/重啟後保留）----------
+_WATCHLIST_DDL = db.SCHEMA["watchlist"]
+_WATCHLIST_SEED = ["1101", "1102", "1216", "1301", "2330", "2317", "0050"]
+
+
+def list_watchlist() -> list[str]:
+    """自選股代碼清單（依加入時間排序）。首次為空時以預設清單種子。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_WATCHLIST_DDL)
+        rows = conn.execute(
+            "SELECT stock_id FROM watchlist ORDER BY added_at, stock_id"
+        ).fetchall()
+        if not rows:  # 一次性種子，保留原本預設清單體驗
+            now = dt.datetime.now().isoformat(timespec="seconds")
+            conn.executemany(
+                "INSERT OR IGNORE INTO watchlist (stock_id, added_at) VALUES (?,?)",
+                [(sid, now) for sid in _WATCHLIST_SEED],
+            )
+            return list(_WATCHLIST_SEED)
+    return [r[0] for r in rows]
+
+
+def add_watchlist(stock_id: str) -> list[str]:
+    """加入自選（冪等），回傳更新後清單。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_WATCHLIST_DDL)
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist (stock_id, added_at) VALUES (?,?)",
+            (stock_id, dt.datetime.now().isoformat(timespec="seconds")),
+        )
+    return list_watchlist()
+
+
+def remove_watchlist(stock_id: str) -> list[str]:
+    """移除自選（冪等），回傳更新後清單。"""
+    with db.connect(_db_path()) as conn:
+        conn.execute(_WATCHLIST_DDL)
+        conn.execute("DELETE FROM watchlist WHERE stock_id=?", (stock_id,))
+    return list_watchlist()

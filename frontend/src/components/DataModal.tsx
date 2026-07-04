@@ -57,7 +57,6 @@ export function DataModal({ onClose }: { onClose: () => void }) {
     } catch (e) { alert(String(e)); }
   };
   const stop_ = async () => { await api.backfillStop(); };
-  const init_ = async () => { await api.initDb(); loadStatus(); };
   const runQc = async () => {
     setQcLoading(true);
     try { setQc(await api.qualityCheck()); } catch (e) { alert(String(e)); }
@@ -197,7 +196,6 @@ export function DataModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-foot">
           <button className="btn" onClick={runQc} disabled={qcLoading}>🩺 品質檢查</button>
-          <button className="btn" onClick={init_}>初始化資料庫</button>
           <button className="btn" onClick={onClose}>關閉</button>
         </div>
       </div>

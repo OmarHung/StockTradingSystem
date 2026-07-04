@@ -136,6 +136,22 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (as_of, stock_id)
         )
     """,
+    # 選股結果快照：每個基準日保留一份完整初篩結果（供 WebUI 重整/重啟後還原）。
+    "screener_result": """
+        CREATE TABLE IF NOT EXISTS screener_result (
+            as_of      TEXT PRIMARY KEY,
+            rows_json  TEXT NOT NULL,      -- 完整結果 list[dict] 的 JSON
+            top_n      INTEGER,
+            created_at TEXT
+        )
+    """,
+    # 自選清單：使用者關注的個股（供 WebUI 自選面板，重整/重啟後保留）。
+    "watchlist": """
+        CREATE TABLE IF NOT EXISTS watchlist (
+            stock_id TEXT PRIMARY KEY,
+            added_at TEXT
+        )
+    """,
     # 回補進度紀錄：記錄每檔每類資料「已補範圍」(first_date~last_date)，
     # 供「最新優先」兩趟回補判斷缺口。
     "fetch_log": """

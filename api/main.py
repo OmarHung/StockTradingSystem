@@ -127,7 +127,40 @@ def screener(as_of: str, top_n: int | None = None):
         return []
     if top_n:
         ranked = ranked.head(top_n)
-    return _records(ranked)
+    rows = _records(ranked)
+    q.save_screener_result(as_of, rows, top_n)  # 快照：重整/重啟後可還原
+    return rows
+
+
+@app.get("/api/screener/saved")
+def screener_saved(as_of: str):
+    """讀取某基準日已保存的選股結果（無則 null）。"""
+    return q.load_screener_result(as_of)
+
+
+@app.get("/api/screener/history")
+def screener_history():
+    """已保存選股結果的日期清單（新到舊）。"""
+    return q.list_screener_dates()
+
+
+# ---------- 自選清單 ----------
+@app.get("/api/watchlist")
+def watchlist():
+    """自選股代碼清單。"""
+    return q.list_watchlist()
+
+
+@app.post("/api/watchlist/{stock_id}")
+def watchlist_add(stock_id: str):
+    """加入自選，回傳更新後清單。"""
+    return q.add_watchlist(stock_id)
+
+
+@app.delete("/api/watchlist/{stock_id}")
+def watchlist_remove(stock_id: str):
+    """移除自選，回傳更新後清單。"""
+    return q.remove_watchlist(stock_id)
 
 
 # ---------- 回測 ----------
@@ -228,14 +261,8 @@ def set_env(req: EnvUpdate):
     return {"status": "saved"}
 
 
-# ---------- 資料管理（初始化 / 背景回補）----------
+# ---------- 資料管理（背景回補；資料表建立由回補自動處理）----------
 _BACKFILL_JOB = "backfill"
-
-
-@app.post("/api/init-db")
-def init_db():
-    db.init_db(get_settings().db_path)
-    return {"status": "ok", "tables": list(db.SCHEMA.keys())}
 
 
 class BackfillReq(BaseModel):
