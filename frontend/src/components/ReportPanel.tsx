@@ -14,6 +14,14 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   const [topN, setTopN] = useState(3);
   const [recs, setRecs] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  // 股名對照表（一次載入；歷史報告也吃得到）
+  useEffect(() => {
+    api.stocks().then((list) =>
+      setNames(Object.fromEntries(list.map((s) => [s.stock_id, s.stock_name])))
+    ).catch(() => {});
+  }, []);
 
   // 預設帶入最新交易日；順便載回該日已存的交易計畫（重整後不遺失）
   useEffect(() => {
@@ -54,7 +62,9 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
             <div key={rec.stock_id} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className={`tag ${a.cls}`}>{a.label}</span>
-                <b style={{ cursor: "pointer" }} onClick={() => onSelect(rec.stock_id)}>{rec.stock_id}</b>
+                <b style={{ cursor: "pointer" }} onClick={() => onSelect(rec.stock_id)}>
+                  {rec.stock_id}{names[rec.stock_id] ? ` ${names[rec.stock_id]}` : ""}
+                </b>
                 <span className="mono" style={{ color: "var(--text-dim)" }}>
                   動作分 {p.action_score > 0 ? "+" : ""}{fmt(p.action_score)} · 信心 {fmt(p.confidence * 100, 0)}%
                 </span>
