@@ -113,8 +113,12 @@ def _roc_to_iso(roc: str) -> str | None:
 
 
 def fetch_disposition(conn) -> int:
-    """抓 TWSE + TPEx 當前處置股名單。全市場一次，冪等 upsert。"""
-    import requests
+    """抓 TWSE + TPEx 當前處置股名單。全市場一次，冪等 upsert。
+
+    走 twse_source._session：TPEx 憑證缺 SKI 擴展，Python 3.13 預設
+    VERIFY_X509_STRICT 會讓裸 requests 對 tpex 握手失敗。
+    """
+    from src.data.twse_source import _session as requests  # noqa: N813
 
     now = dt.datetime.now().isoformat(timespec="seconds")
     rows: list[dict] = []

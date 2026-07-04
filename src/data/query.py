@@ -432,6 +432,8 @@ _DATASET_META = {
 }
 # 月營收是月頻資料，新鮮度用「天」衡量而非交易日
 _MONTHLY = {"month_revenue"}
+# 事件型資料：只有發生事件的股票才有資料，覆蓋率天生 <100%，不做覆蓋率警告
+_EVENT_DATA = {"dividend"}
 
 
 def data_status() -> dict:
@@ -487,8 +489,9 @@ def data_status() -> dict:
                 status, hint = "stale", f"落後 {lag_days} 天"
             else:
                 status, hint = "stale", f"落後 {lag_days} 天" if lag_days is not None else "未知"
-            # 覆蓋率低於 8 成一律降級提醒
-            if stocks_n > 0 and coverage < 80:
+            # 覆蓋率低於 8 成降級提醒（事件型資料除外：除權息只有配息的
+            # 公司才有資料，~79% 就是自然上限，不是缺資料）
+            if stocks_n > 0 and coverage < 80 and table not in _EVENT_DATA:
                 status = "partial" if status == "ok" else status
                 hint += f"，僅覆蓋 {coverage}% 股票池"
 
@@ -504,7 +507,7 @@ def data_status() -> dict:
     for d in datasets:
         if d["status"] == "missing":
             problems.append(f"「{d['label']}」尚未回補")
-        elif d["coverage_pct"] < 80 and d["stocks"] > 0:
+        elif d["coverage_pct"] < 80 and d["stocks"] > 0 and d["table"] not in _EVENT_DATA:
             problems.append(f"「{d['label']}」只有 {d['stocks']}/{d['universe']} 檔")
         elif d["status"] == "stale":
             problems.append(f"「{d['label']}」{d['hint']}")
