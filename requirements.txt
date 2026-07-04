@@ -23,3 +23,4 @@ pydantic>=2.0           # 結構化輸出 schema
 # --- 開發 ---
 pytest>=8.0
 shioaji>=1.2            # 永豐金 API（回補備援源；Phase 5 模擬/實盤交易）
+chromadb>=1.5           # 向量記憶庫（Phase 4 反思學習）

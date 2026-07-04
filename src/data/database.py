@@ -180,10 +180,16 @@ SCHEMA: dict[str, str] = {
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """輕量遷移：舊 fetch_log 補上 first_date 欄位。"""
+    """輕量遷移：舊表補新欄位。"""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(fetch_log)").fetchall()]
     if cols and "first_date" not in cols:
         conn.execute("ALTER TABLE fetch_log ADD COLUMN first_date TEXT")
+    # Phase 4：trade_plan 成果評估欄位
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(trade_plan)").fetchall()]
+    if cols:
+        for col, ddl in (("outcome", "TEXT"), ("outcome_return", "REAL"), ("evaluated_at", "TEXT")):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE trade_plan ADD COLUMN {col} {ddl}")
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:

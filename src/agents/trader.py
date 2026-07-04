@@ -26,10 +26,23 @@ def run_trader(stock_id: str, as_of: str, analyst_bundle: dict, tech_feats: dict
         "(目標-進場中值)/(進場中值-停損) 至少 1.5 才建議 buy，否則 hold 或 avoid。"
         f"參考：目前收盤約 {close}，ATR14 約 {atr}（可用於設定停損距離）。"
     )
+    # Phase 4：語意檢索歷史經驗與反思規則，注入決策（記憶庫為空則此段為空字串）
+    memory_block = ""
+    try:
+        from src.memory.reflect import memory_context
+        situation_parts = [stock_id]
+        for name, e in analyst_bundle.items():
+            r = e.get("report", {})
+            situation_parts.append(f"{name}:{r.get('signal')}({r.get('score')})")
+        memory_block = memory_context(" | ".join(str(x) for x in situation_parts))
+    except Exception:  # noqa: BLE001 — 記憶層故障不影響決策主流程
+        pass
+
     prompt = (
         f"股票代號 {stock_id}，基準日 {as_of}。\n各分析師報告與驗證結果：\n"
         f"{json.dumps(analyst_bundle, ensure_ascii=False, indent=2)}\n\n"
-        "請綜合判斷，輸出 action(buy/hold/avoid)、action_score[-1,1]、confidence、"
+        + (f"{memory_block}\n\n" if memory_block else "")
+        + "請綜合判斷，輸出 action(buy/hold/avoid)、action_score[-1,1]、confidence、"
         "進出場計畫與理由。目前無持倉。"
     )
     plan = llm.call_structured(

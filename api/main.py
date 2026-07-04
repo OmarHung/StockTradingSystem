@@ -233,6 +233,47 @@ def friction(limit: int = 100):
     return _records(df)
 
 
+# ---------- Phase 4：反思與向量記憶 ----------
+@app.get("/api/memory/status")
+def memory_status():
+    from src.memory import store
+    return store.count_all()
+
+
+@app.get("/api/memory/rules")
+def memory_rules():
+    from src.memory import store
+    return store.list_rules()
+
+
+class RuleToggle(BaseModel):
+    rule_id: str
+    active: bool
+
+
+@app.post("/api/memory/rules/toggle")
+def memory_rule_toggle(req: RuleToggle):
+    from src.memory import store
+    store.set_rule_active(req.rule_id, req.active)
+    return {"status": "ok"}
+
+
+@app.get("/api/memory/experiences")
+def memory_experiences(limit: int = 30):
+    from src.memory import store
+    return store.recent_experiences(limit)
+
+
+@app.post("/api/reflect/run")
+def reflect_run():
+    """一鍵反思：評估到期計畫 → 同步 friction → LLM 歸納規則。"""
+    from src.memory import outcome, reflect
+    evaluated = outcome.evaluate_pending()
+    outcome.sync_friction_to_blocked()
+    result = reflect.run_reflection()
+    return {"evaluation": evaluated, "reflection": result}
+
+
 # ---------- 設定 ----------
 @app.get("/api/config")
 def get_config():
