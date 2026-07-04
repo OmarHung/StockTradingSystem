@@ -223,10 +223,10 @@ export function DataModal({ onClose }: { onClose: () => void }) {
                     : prog.stock_id && <>回補中 <b style={{ color: "var(--text)" }}>{prog.stock_id}</b>（{prog.current}/{prog.total}）</>}
                   {prog.pass === "完成" && "✅ 全部完成"}
                 </span>
-                <span className="mono">{Math.round((prog.current / prog.total) * 100)}%</span>
+                <span className="mono">{prog.total > 0 ? `${Math.round((prog.current / prog.total) * 100)}%` : ""}</span>
               </div>
               <div style={{ height: 8, background: "#0d1119", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${(prog.current / prog.total) * 100}%`,
+                <div style={{ height: "100%", width: `${prog.total > 0 ? (prog.current / prog.total) * 100 : 100}%`,
                   background: prog.pass === "最新" ? "var(--accent)" : "var(--down)", transition: "width 0.3s" }} />
               </div>
             </div>
