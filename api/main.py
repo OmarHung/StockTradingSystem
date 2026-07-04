@@ -64,7 +64,8 @@ def models(top_n: int = 5):
 
 @app.get("/api/data-status")
 def data_status():
-    return _records(q.data_status())
+    """資料健康報告：各資料集覆蓋率/新鮮度/狀態燈 + 是否需要回補的結論。"""
+    return q.data_status()  # 已是 dict（datasets + summary）
 
 
 @app.get("/api/stocks")
@@ -179,7 +180,7 @@ def trade_plans(as_of: str):
 
 @app.get("/api/brain-log")
 def brain_log(limit: int = 100):
-    return q.brain_log(limit=limit).to_dict(orient="records")
+    return _records(q.brain_log(limit=limit))
 
 
 # ---------- 設定 ----------
@@ -315,4 +316,4 @@ def indices():
 @app.get("/api/disposition")
 def disposition(active_on: str | None = None):
     """處置股名單（active_on 給日期則只回傳仍在處置期間者）。"""
-    return q.list_disposition(active_on).to_dict(orient="records")
+    return _records(q.list_disposition(active_on))

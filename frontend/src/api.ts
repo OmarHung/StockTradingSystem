@@ -34,6 +34,18 @@ export interface ScreenerRow {
   rank: number; stock_id: string; stock_name: string; industry_category: string;
   score: number; momentum_20: number; chips_net_buy: number; revenue_yoy: number | null;
 }
+export interface DatasetStatus {
+  table: string; label: string; desc: string;
+  stocks: number; universe: number; coverage_pct: number;
+  first_date: string | null; last_date: string | null;
+  lag_days: number | null; status: "ok" | "stale" | "partial" | "missing"; hint: string;
+}
+export interface DataStatus {
+  latest_trading_day: string | null;
+  universe: number;
+  datasets: DatasetStatus[];
+  summary: { level: "ok" | "warn"; text: string };
+}
 export interface BacktestResult {
   metrics: Record<string, number | string | null>;
   equity_curve: { time: string; value: number }[];
@@ -49,7 +61,7 @@ export interface ModelInfo {
 
 export const api = {
   health: () => get<{ status: string; has_api_key: boolean }>("/health"),
-  dataStatus: () => get<Record<string, unknown>[]>("/data-status"),
+  dataStatus: () => get<DataStatus>("/data-status"),
   stocks: () => get<{ stock_id: string; stock_name: string; industry_category: string }[]>("/stocks"),
   quote: (id: string) => get<Quote>(`/quote/${id}`),
   price: (id: string, limit = 250, tf = "D") =>

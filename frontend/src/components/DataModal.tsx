@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, type DataStatus } from "../api";
 
-/** 資料狀態視窗：覆蓋概況 + 初始化 + 背景回補（逐檔進度）+ 品質檢查。 */
+const STATUS_UI: Record<string, { icon: string; color: string }> = {
+  ok:      { icon: "✅", color: "var(--down)" },
+  stale:   { icon: "⚠️", color: "var(--warning)" },
+  partial: { icon: "⚠️", color: "var(--warning)" },
+  missing: { icon: "❌", color: "var(--up)" },
+};
+
+/** 資料狀態視窗：健康報告（覆蓋率/新鮮度/結論）+ 回補（逐檔進度）+ 品質檢查。 */
 export function DataModal({ onClose }: { onClose: () => void }) {
-  const [status, setStatus] = useState<Record<string, any>[]>([]);
+  const [status, setStatus] = useState<DataStatus | null>(null);
   const [mode, setMode] = useState("limit");
   const [start, setStart] = useState("2020-01-01");
   const [stocks, setStocks] = useState("2330 2317 0050");
@@ -60,22 +67,59 @@ export function DataModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="modal-body">
-          {/* 覆蓋概況 */}
-          <table className="grid">
-            <thead><tr><th>資料表</th><th>列數</th><th>股票數</th><th>起</th><th>迄</th></tr></thead>
-            <tbody>
-              {status.map((r) => (
-                <tr key={r.table as string}>
-                  <td>{r.table}</td>
-                  <td className="mono">{Number(r.rows).toLocaleString()}</td>
-                  <td className="mono">{r.stocks as number}</td>
-                  <td className="mono" style={{ fontSize: 11 }}>{r.min_date as string}</td>
-                  <td className="mono" style={{ fontSize: 11 }}>{r.max_date as string}</td>
-                </tr>
-              ))}
-              {status.length === 0 && <tr><td colSpan={5} className="empty-hint">尚無資料，請先初始化並回補</td></tr>}
-            </tbody>
-          </table>
+          {/* 整體結論 */}
+          {status?.summary && (
+            <div style={{
+              padding: "8px 12px", borderRadius: 6, marginBottom: 12, fontSize: 12,
+              background: status.summary.level === "ok" ? "rgba(14,203,129,0.1)" : "rgba(240,185,11,0.1)",
+              border: `1px solid ${status.summary.level === "ok" ? "var(--down)" : "var(--warning)"}`,
+              color: status.summary.level === "ok" ? "var(--down)" : "var(--warning)",
+            }}>
+              {status.summary.level === "ok" ? "✅ " : "💡 "}{status.summary.text}
+              {status.latest_trading_day && (
+                <span style={{ color: "var(--text-dim)", marginLeft: 8 }}>
+                  （最新交易日 {status.latest_trading_day}）
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* 各資料集健康狀態 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {status?.datasets.map((d) => {
+              const ui = STATUS_UI[d.status] ?? STATUS_UI.missing;
+              return (
+                <div key={d.table} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+                  background: "#0d1119", borderRadius: 6, fontSize: 12,
+                }}>
+                  <span style={{ fontSize: 14 }}>{ui.icon}</span>
+                  <div style={{ flex: "0 0 190px" }}>
+                    <div style={{ fontWeight: 600 }}>{d.label}</div>
+                    <div style={{ color: "var(--text-dim)", fontSize: 10 }}>{d.desc}</div>
+                  </div>
+                  {/* 覆蓋率條 */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-dim)", marginBottom: 2 }}>
+                      <span>覆蓋 {d.stocks}/{d.universe} 檔</span>
+                      <span>{d.coverage_pct}%</span>
+                    </div>
+                    <div style={{ height: 5, background: "#1a1e2a", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.min(d.coverage_pct, 100)}%`,
+                        background: d.coverage_pct >= 80 ? "var(--down)" : "var(--warning)" }} />
+                    </div>
+                  </div>
+                  <div style={{ flex: "0 0 150px", textAlign: "right" }}>
+                    <div className="mono" style={{ fontSize: 11 }}>
+                      {d.last_date ? `更新至 ${d.last_date}` : "無資料"}
+                    </div>
+                    <div style={{ fontSize: 11, color: ui.color }}>{d.hint}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {!status && <div className="empty-hint">載入中…</div>}
+          </div>
 
           {/* 回補控制 */}
           <div style={{ marginTop: 14, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

@@ -286,16 +286,93 @@ def brain_log(limit: int = 100, as_of: str | None = None) -> pd.DataFrame:
         return db.read_sql(conn, sql, params)
 
 
-def data_status() -> pd.DataFrame:
-    """各資料表的覆蓋概況（供 WebUI 資料狀態頁）。"""
-    rows = []
+# 資料表 → 使用者看得懂的說明
+_DATASET_META = {
+    "price_daily":  {"label": "股價日K線",     "desc": "開高低收與成交量（選股/回測/K線圖）"},
+    "institutional": {"label": "三大法人買賣超", "desc": "外資/投信/自營商動向（籌碼分析）"},
+    "margin":        {"label": "融資融券",       "desc": "散戶槓桿與軋空訊號（籌碼分析）"},
+    "month_revenue": {"label": "月營收",         "desc": "每月10日前公告（基本面分析）"},
+    "dividend":      {"label": "除權息",         "desc": "還原價計算必需，缺了動能會失真"},
+}
+# 月營收是月頻資料，新鮮度用「天」衡量而非交易日
+_MONTHLY = {"month_revenue"}
+
+
+def data_status() -> dict:
+    """資料健康報告（供 WebUI 資料狀態視窗）。
+
+    每個資料集回：中文名稱、覆蓋率（幾檔/股票池）、最新日期、落後天數、狀態燈。
+    附整體結論 summary（該不該回補、缺什麼）。
+    """
+    import datetime as dt
+
     with db.connect(_db_path()) as conn:
-        for table in ("price_daily", "institutional", "margin", "month_revenue", "dividend"):
+        # 股票池大小（上市+上櫃普通股，同回補目標口徑）
+        uni = db.read_sql(
+            conn,
+            "SELECT COUNT(*) AS c FROM stock_info "
+            "WHERE type IN ('twse','tpex') AND length(stock_id)=4 "
+            "AND stock_id GLOB '[0-9][0-9][0-9][0-9]'",
+        )
+        universe = int(uni.iloc[0]["c"]) if not uni.empty else 0
+
+        # 最新交易日（TAIEX 為準；沒有就用今天）
+        cal = db.read_sql(conn, "SELECT MAX(date) AS d FROM price_daily WHERE stock_id='TAIEX'")
+        latest_trading = cal.iloc[0]["d"] if not cal.empty and cal.iloc[0]["d"] else None
+
+        datasets = []
+        for table, meta in _DATASET_META.items():
             r = db.read_sql(
                 conn,
-                f"SELECT COUNT(*) AS rows, COUNT(DISTINCT stock_id) AS stocks, "
-                f"MIN(date) AS min_date, MAX(date) AS max_date FROM {table}",
-            )
-            r.insert(0, "table", table)
-            rows.append(r)
-    return pd.concat(rows, ignore_index=True)
+                f"SELECT COUNT(*) AS n, COUNT(DISTINCT stock_id) AS stocks, "
+                f"MIN(date) AS lo, MAX(date) AS hi FROM {table} "
+                f"WHERE stock_id NOT IN ('TAIEX','TPEx')",
+            ).iloc[0]
+            stocks_n = int(r["stocks"])
+            coverage = round(stocks_n / universe * 100) if universe else 0
+
+            # 新鮮度：落後最新交易日幾天（月營收放寬到 40 天內算正常）
+            lag_days = None
+            if r["hi"]:
+                ref = latest_trading or dt.date.today().isoformat()
+                lag_days = (dt.date.fromisoformat(ref) - dt.date.fromisoformat(r["hi"])).days
+
+            if stocks_n == 0:
+                status, hint = "missing", "尚未回補"
+            elif table in _MONTHLY:
+                status = "ok" if (lag_days is not None and lag_days <= 40) else "stale"
+                hint = "最新" if status == "ok" else f"落後 {lag_days} 天"
+            elif lag_days is not None and lag_days <= 1:
+                status, hint = "ok", "最新"
+            elif lag_days is not None and lag_days <= 7:
+                status, hint = "stale", f"落後 {lag_days} 天"
+            else:
+                status, hint = "stale", f"落後 {lag_days} 天" if lag_days is not None else "未知"
+            # 覆蓋率低於 8 成一律降級提醒
+            if stocks_n > 0 and coverage < 80:
+                status = "partial" if status == "ok" else status
+                hint += f"，僅覆蓋 {coverage}% 股票池"
+
+            datasets.append({
+                "table": table, "label": meta["label"], "desc": meta["desc"],
+                "stocks": stocks_n, "universe": universe, "coverage_pct": coverage,
+                "first_date": r["lo"], "last_date": r["hi"],
+                "lag_days": lag_days, "status": status, "hint": hint,
+            })
+
+    # 整體結論
+    problems = []
+    for d in datasets:
+        if d["status"] == "missing":
+            problems.append(f"「{d['label']}」尚未回補")
+        elif d["coverage_pct"] < 80 and d["stocks"] > 0:
+            problems.append(f"「{d['label']}」只有 {d['stocks']}/{d['universe']} 檔")
+        elif d["status"] == "stale":
+            problems.append(f"「{d['label']}」{d['hint']}")
+    if problems:
+        summary = {"level": "warn", "text": "建議執行回補：" + "；".join(problems[:4])}
+    else:
+        summary = {"level": "ok", "text": "資料完整且新鮮，無需回補。"}
+
+    return {"latest_trading_day": latest_trading, "universe": universe,
+            "datasets": datasets, "summary": summary}
