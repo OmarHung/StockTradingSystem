@@ -349,11 +349,14 @@ def data_status() -> dict:
 
         datasets = []
         for table, meta in _DATASET_META.items():
+            # 覆蓋率只計股票池成員（官方全市場源會多抓 ETF/特殊證券，避免 >100%）
             r = db.read_sql(
                 conn,
-                f"SELECT COUNT(*) AS n, COUNT(DISTINCT stock_id) AS stocks, "
-                f"MIN(date) AS lo, MAX(date) AS hi FROM {table} "
-                f"WHERE stock_id NOT IN ('TAIEX','TPEx')",
+                f"SELECT COUNT(*) AS n, COUNT(DISTINCT t.stock_id) AS stocks, "
+                f"MIN(t.date) AS lo, MAX(t.date) AS hi FROM {table} t "
+                f"JOIN stock_info s ON s.stock_id = t.stock_id "
+                f"WHERE s.type IN ('twse','tpex') AND length(t.stock_id)=4 "
+                f"AND t.stock_id GLOB '[0-9][0-9][0-9][0-9]'",
             ).iloc[0]
             stocks_n = int(r["stocks"])
             coverage = round(stocks_n / universe * 100) if universe else 0

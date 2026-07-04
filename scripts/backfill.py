@@ -263,19 +263,41 @@ def _official_chips_backfill(conn, start: str, end: str, force: bool = False) ->
 
     now = dt.datetime.now().isoformat(timespec="seconds")
     total = len(todo)
-    for i, day in enumerate(todo):
-        need_twse = day not in done["twse"]
-        need_tpex = day not in done["tpex"]
-        counts = {"twse_inst": 0, "tpex_inst": 0, "twse_margin": 0, "tpex_margin": 0}
+    # 斷路器：某市場連續失敗 3 次 → 本輪跳過該市場（站掛了，別浪費逾時等待；
+    # 未標記的日子下次執行自動續補）
+    consec_fail = {"twse": 0, "tpex": 0}
+    tripped: set[str] = set()
+
+    def _fetch(mkt: str, fn, day: str) -> int:
+        """單源抓取：錯誤隔離（一源失敗不影響其他源）+ 斷路器計數。"""
+        if mkt in tripped:
+            return 0
         try:
-            if need_twse:
-                counts["twse_inst"] = twse_source.fetch_twse_institutional(conn, day)
-                counts["twse_margin"] = twse_source.fetch_twse_margin(conn, day)
-            if need_tpex:
-                counts["tpex_inst"] = twse_source.fetch_tpex_institutional(conn, day)
-                counts["tpex_margin"] = twse_source.fetch_tpex_margin(conn, day)
-        except Exception as e:  # noqa: BLE001 — 單日失敗不中斷，下次續補
-            log.warning("官方籌碼 %s 失敗：%s", day, str(e)[:100])
+            n = fn(conn, day)
+            consec_fail[mkt] = 0
+            return n
+        except Exception as e:  # noqa: BLE001
+            consec_fail[mkt] += 1
+            log.warning("官方籌碼 %s/%s %s 失敗：%s", mkt, fn.__name__, day, str(e)[:90])
+            if consec_fail[mkt] >= 3:
+                tripped.add(mkt)
+                log.warning("官方源 %s 連續失敗 3 次，本輪停用（缺日下次自動續補）", mkt)
+            return 0
+
+    for i, day in enumerate(todo):
+        need_twse = day not in done["twse"] and "twse" not in tripped
+        need_tpex = day not in done["tpex"] and "tpex" not in tripped
+        if not need_twse and not need_tpex:
+            if tripped >= {"twse", "tpex"}:
+                break  # 兩市場都熔斷，本輪結束
+            continue
+        counts = {"twse_inst": 0, "tpex_inst": 0, "twse_margin": 0, "tpex_margin": 0}
+        if need_twse:
+            counts["twse_inst"] = _fetch("twse", twse_source.fetch_twse_institutional, day)
+            counts["twse_margin"] = _fetch("twse", twse_source.fetch_twse_margin, day)
+        if need_tpex:
+            counts["tpex_inst"] = _fetch("tpex", twse_source.fetch_tpex_institutional, day)
+            counts["tpex_margin"] = _fetch("tpex", twse_source.fetch_tpex_margin, day)
         rows_day = sum(counts.values())
         # 逐市場標記完成（當日資料 ~16:30 才公布 → 今天 0 列不標記，明天再補）
         if need_twse and counts["twse_inst"] > 0 and counts["twse_margin"] > 0:
