@@ -165,13 +165,13 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         if "valuation" in requested:
             _official_valuation_backfill(conn, default_start, end, force=force)
         if "dividend" in active:
-            try:
-                n = _official_dividend_backfill(conn, default_start, end)
-                if n > 0:
-                    official_skip.setdefault("dividend", set()).add("twse")
-                    log.info("除權息官方源（TWT49U）補入 %d 筆（上市檔 FinMind 跳過）", n)
-            except Exception as e:  # noqa: BLE001
-                log.warning("除權息官方源失敗，維持 FinMind：%s", e)
+            div_counts = _official_dividend_backfill(conn, default_start, end)
+            for mkt, n in div_counts.items():
+                if n >= 0:   # 官方源成功（含 0 筆＝該期間確實無除權息）→ FinMind 跳過
+                    official_skip.setdefault("dividend", set()).add(mkt)
+            if any(n > 0 for n in div_counts.values()):
+                log.info("除權息官方源補入 上市 %s / 上櫃 %s 筆（成功市場 FinMind 跳過）",
+                         div_counts["twse"], div_counts["tpex"])
         if "month_revenue" in active:
             rev_cov = _official_revenue_backfill(conn, default_start, end, force=force)
             for mkt, ok in rev_cov.items():
@@ -451,28 +451,28 @@ def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) 
     return {mkt: (all_keys - {latest_key}) <= done[mkt] for mkt in mkt_map}
 
 
-def _official_dividend_backfill(conn, start: str, end: str) -> int:
-    """TWT49U 除權息（日期區間全市場，按季分段避免單次過大）。
+def _official_dividend_backfill(conn, start: str, end: str) -> dict:
+    """官方除權息（上市 TWT49U + 上櫃 exDailyQ，皆為日期區間全市場，按季分段）。
 
-    另抓 TPEx openapi tpex_exright_daily（無日期參數＝近期滾動快照，
-    每次執行持續累積上櫃除權息；2 年歷史缺口仍由 FinMind 備援補齊）。
+    回傳 {"twse": 筆數, "tpex": 筆數}；成功的市場 FinMind 直接跳過。
+    單市場失敗不中斷另一市場（各自 try，失敗市場筆數 -1 表示不可標記跳過）。
     """
-    total = 0
-    s = dt.date.fromisoformat(start)
-    e = dt.date.fromisoformat(end)
-    while s <= e:
-        seg_end = min(s + dt.timedelta(days=92), e)
-        total += twse_source.fetch_dividends_range(conn, s.isoformat(), seg_end.isoformat())
-        s = seg_end + dt.timedelta(days=1)
-    try:
-        n_tpex = twse_source.fetch_tpex_dividend(conn)
-        if n_tpex:
-            log.info("除權息 TPEx 官方快照補入 %d 筆", n_tpex)
-        total += n_tpex
-    except Exception as e2:  # noqa: BLE001
-        log.warning("除權息 TPEx 官方快照失敗（上櫃維持 FinMind）：%s", str(e2)[:100])
+    counts = {"twse": 0, "tpex": 0}
+    fns = {"twse": twse_source.fetch_dividends_range,
+           "tpex": twse_source.fetch_tpex_dividends_range}
+    for mkt, fn in fns.items():
+        s = dt.date.fromisoformat(start)
+        e = dt.date.fromisoformat(end)
+        try:
+            while s <= e:
+                seg_end = min(s + dt.timedelta(days=92), e)
+                counts[mkt] += fn(conn, s.isoformat(), seg_end.isoformat())
+                s = seg_end + dt.timedelta(days=1)
+        except Exception as ex:  # noqa: BLE001
+            log.warning("除權息官方源 %s 失敗（該市場維持 FinMind）：%s", mkt, str(ex)[:100])
+            counts[mkt] = -1
     conn.commit()
-    return total
+    return counts
 
 
 def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,

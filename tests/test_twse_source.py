@@ -25,35 +25,33 @@ def test_any_date_formats():
     assert twse_source._any_date("N/A") is None
 
 
-def test_fetch_tpex_dividend_parses_swagger_fields(conn):
-    fixture = [
-        {  # 正常列（欄位名依官方 swagger，含原文拼字 Diviend）
-            "Date": "1150625", "SecuritiesCompanyCode": "5483",
-            "CompanyName": "中美晶",
-            "ClosePriceBeforeExRightsDiviend": "168.5",
-            "ExRightsDiviendQuote": "161.5",
-            "StockDividend": "0", "CashDividend": "7.0",
-            "StockDividendPlusCashDividend": "7.0",
-            "ExRightsDiviend": "息",
-        },
-        {  # 缺價格 → 應略過
-            "Date": "1150626", "SecuritiesCompanyCode": "9999",
-            "ClosePriceBeforeExRightsDiviend": "-",
-            "ExRightsDiviendQuote": "", "ExRightsDiviend": "權",
-        },
-    ]
+def test_fetch_tpex_dividends_range_parses_exdailyq(conn):
+    fixture = {"stat": "ok", "tables": [{
+        "fields": ["除權息日期", "代號", "名稱", "除權息前收盤價", "除權息參考價",
+                   "權值", "息值", "權值+息值", "權/息", "漲停價", "跌停價",
+                   "開始交易基準價", "減除股利參考價", "現金股利", "每仟股無償配股",
+                   "現金增資股數", "現金增資認購價", "公開承銷股數", "員工認購股數",
+                   "原股東認購股數", "按持股比例仟股認購"],
+        "data": [
+            ["115/06/25", "5483", "中美晶", "168.5", "161.5", "0.000000", "7.000000",
+             "7.000000", "除息", "185.0", "145.5", "161.5", "161.5", "7.0", "0",
+             "0", "0.00", "0", "0", "0", "0"],
+            ["115/06/26", "9999", "壞資料", "-", "", "0", "0",
+             "0", "除權", "", "", "", "", "", "", "", "", "", "", "", ""],  # 缺價格 → 略過
+        ],
+    }]}
     resp = MagicMock(status_code=200)
     resp.json.return_value = fixture
-    with patch.object(twse_source._session, "get", return_value=resp), \
+    with patch.object(twse_source._session, "post", return_value=resp), \
          patch.object(twse_source.time, "sleep"):
-        n = twse_source.fetch_tpex_dividend(conn)
+        n = twse_source.fetch_tpex_dividends_range(conn, "2026-06-01", "2026-06-30")
     assert n == 1
     row = conn.execute("SELECT * FROM dividend WHERE stock_id='5483'").fetchone()
     assert row is not None
     sid, date, before, after, dividend, kind = row
     assert date == "2026-06-25"
     assert before == 168.5 and after == 161.5
-    assert dividend == 7.0 and kind == "息"
+    assert dividend == 7.0 and kind == "除息"
 
 
 def test_fetch_twse_valuation_parses_fields(conn):

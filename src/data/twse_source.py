@@ -358,13 +358,13 @@ def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
     return n
 
 
-# ---------- TPEx 除權息（openapi 近期快照，схema 依官方 swagger）----------
-def fetch_tpex_dividend(conn) -> int:
-    """上櫃除權息計算結果（tpex_exright_daily，官方 swagger 定義欄位）。
+# ---------- TPEx 除權息（bulletin/exDailyQ，日期區間、資料回溯 2008）----------
+def fetch_tpex_dividends_range(conn, start_iso: str, end_iso: str) -> int:
+    """上櫃除權息計算結果（上櫃版 TWT49U）。
 
-    無日期參數＝近期滾動快照 → 供每日更新持續累積；歷史由 FinMind 備援補。
-    對照 dividend 表：before=除權息前收盤、after=除權息參考價、
-    dividend=權值加息值、kind=權或息。
+    端點藏在新版 RWD 站（頁面 /zh-tw/announce/market/ex/cal.html 內嵌
+    action="bulletin/exDailyQ"），必須用 POST；openapi 的 tpex_exright_daily
+    只有近期快照不能回補，勿用。
     """
     global _last_call
     host = "www.tpex.org.tw"
@@ -374,28 +374,39 @@ def fetch_tpex_dividend(conn) -> int:
         time.sleep(wait)
     _last_call[host] = time.monotonic()
 
-    r = _session.get(f"https://{host}/openapi/v1/tpex_exright_daily",
-                     headers=_HEADERS, timeout=30)
+    r = _session.post(f"https://{host}/www/zh-tw/bulletin/exDailyQ",
+                      data={"startDate": start_iso.replace("-", "/"),
+                            "endDate": end_iso.replace("-", "/"),
+                            "response": "json"},
+                      headers=_HEADERS, timeout=30)
     if r.status_code != 200:
-        raise OfficialSourceError(f"tpex_exright_daily HTTP {r.status_code}")
-    data = r.json()
-    if not isinstance(data, list):
+        raise OfficialSourceError(f"exDailyQ HTTP {r.status_code}")
+    j = r.json()
+    tables = j.get("tables") or []
+    if str(j.get("stat")).lower() != "ok" or not tables or not tables[0].get("data"):
         return 0
+    t = tables[0]
+    fields = t.get("fields") or []
 
+    def col(name_part: str) -> int:
+        for i, f in enumerate(fields):
+            if name_part in f:
+                return i
+        raise OfficialSourceError(f"exDailyQ 找不到欄位 {name_part}（欄位定義變更？）")
+
+    di, ci = col("除權息日期"), col("代號")
+    bi, ai = col("除權息前收盤價"), col("除權息參考價")
+    vi, ki = col("權值+息值"), col("權/息")
     rows = []
-    for d in data:
-        sid = str(d.get("SecuritiesCompanyCode", "")).strip()
-        date = _any_date(d.get("Date", ""))
-        before = _fnum(d.get("ClosePriceBeforeExRightsDiviend"))
-        after = _fnum(d.get("ExRightsDiviendQuote"))
+    for row in t["data"]:
+        sid = str(row[ci]).strip()
+        date = _roc_date(row[di])
+        before, after = _fnum(row[bi]), _fnum(row[ai])
         if not sid or not date or not before or not after:
             continue
-        rows.append({
-            "stock_id": sid, "date": date,
-            "before_price": before, "after_price": after,
-            "dividend": _fnum(d.get("StockDividendPlusCashDividend")),
-            "kind": str(d.get("ExRightsDiviend", "")).strip(),
-        })
+        rows.append({"stock_id": sid, "date": date,
+                     "before_price": before, "after_price": after,
+                     "dividend": _fnum(row[vi]), "kind": str(row[ki]).strip()})
     if not rows:
         return 0
     return db.upsert_dataframe(conn, "dividend", pd.DataFrame(rows))
