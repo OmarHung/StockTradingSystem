@@ -7,6 +7,8 @@ __pycache__/
 # 資料與日誌（不入版控）
 data/*.db
 data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 data/*.parquet
 logs/*.log
 logs/jobs/
