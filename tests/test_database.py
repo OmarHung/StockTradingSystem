@@ -45,10 +45,14 @@ def test_upsert_ignores_extra_columns(tmp_path):
     assert got.iloc[0]["close"] == 593.0
 
 
-def test_fetch_log_roundtrip(tmp_path):
+def test_fetch_log_range_roundtrip(tmp_path):
     dbfile = tmp_path / "t.db"
     db.init_db(dbfile)
     with db.connect(dbfile) as conn:
-        assert db.get_last_date(conn, "price_daily", "2330") is None
-        db.set_last_date(conn, "price_daily", "2330", "2024-01-05", "2024-01-06T00:00:00")
-        assert db.get_last_date(conn, "price_daily", "2330") == "2024-01-05"
+        assert db.get_range(conn, "price_daily", "2330") == (None, None)
+        # 併入一段，再併入更早+更晚的一段 → 應取聯集端點
+        db.merge_range(conn, "price_daily", "2330", "2024-03-01", "2024-06-30", "t1")
+        assert db.get_range(conn, "price_daily", "2330") == ("2024-03-01", "2024-06-30")
+        db.merge_range(conn, "price_daily", "2330", "2024-01-01", "2024-08-31", "t2")
+        assert db.get_range(conn, "price_daily", "2330") == ("2024-01-01", "2024-08-31")
+        assert db.get_last_date(conn, "price_daily", "2330") == "2024-08-31"

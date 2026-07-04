@@ -12,6 +12,7 @@ export function DataPanel() {
   const [force, setForce] = useState(false);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState("");
+  const [prog, setProg] = useState<{ pass: string; current: number; total: number; stock_id: string; rows: number } | null>(null);
   const poll = useRef<number | null>(null);
 
   const loadStatus = () => api.dataStatus().then(setStatus).catch(() => {});
@@ -21,9 +22,9 @@ export function DataPanel() {
     if (poll.current) clearInterval(poll.current);
     poll.current = window.setInterval(async () => {
       const s = await api.backfillStatus();
-      setRunning(s.running); setLog(s.log);
+      setRunning(s.running); setLog(s.log); setProg(s.progress);
       if (!s.running) { clearInterval(poll.current!); poll.current = null; loadStatus(); }
-    }, 1500);
+    }, 1200);
   };
 
   const start_ = async () => {
@@ -73,8 +74,28 @@ export function DataPanel() {
             {running ? "🟢 執行中" : "⚪ 閒置"}
           </span>
         </div>
+
+        {prog && (running || prog.pass === "完成") && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-dim)", marginBottom: 4 }}>
+              <span>
+                <span className="tag" style={{ background: "var(--accent-dim)", color: "#8ab4ff", marginRight: 6 }}>
+                  {prog.pass === "最新" ? "① 最新優先" : prog.pass === "歷史" ? "② 歷史回填" : prog.pass}
+                </span>
+                {prog.stock_id && <>回補中 <b style={{ color: "var(--text)" }}>{prog.stock_id}</b>（{prog.current}/{prog.total}）</>}
+                {prog.pass === "完成" && "✅ 全部完成"}
+              </span>
+              <span className="mono">{Math.round((prog.current / prog.total) * 100)}%</span>
+            </div>
+            <div style={{ height: 8, background: "#0d1119", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(prog.current / prog.total) * 100}%`,
+                background: prog.pass === "最新" ? "var(--accent)" : "var(--down)", transition: "width 0.3s" }} />
+            </div>
+          </div>
+        )}
+
         {log && <pre style={{ marginTop: 8, fontSize: 10, color: "var(--text-dim)", background: "#0d1119",
-          padding: 8, borderRadius: 4, maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap" }}>{log}</pre>}
+          padding: 8, borderRadius: 4, maxHeight: 100, overflow: "auto", whiteSpace: "pre-wrap" }}>{log}</pre>}
       </div>
     </Panel>
   );

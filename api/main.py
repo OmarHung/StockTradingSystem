@@ -244,7 +244,24 @@ def backfill_start(req: BackfillReq):
 
 @app.get("/api/backfill/status")
 def backfill_status():
-    return {"running": jobs.is_running(_BACKFILL_JOB), "log": jobs.read_log(_BACKFILL_JOB, tail=25)}
+    log_text = jobs.read_log(_BACKFILL_JOB, tail=40)
+    # 解析最後一筆 @@PROGRESS@@ 結構化進度
+    progress = None
+    import json as _json
+    for line in reversed(log_text.splitlines()):
+        if line.startswith("@@PROGRESS@@"):
+            try:
+                progress = _json.loads(line[len("@@PROGRESS@@"):].strip())
+            except Exception:  # noqa: BLE001
+                pass
+            break
+    # log 顯示時濾掉 PROGRESS 雜訊
+    clean = "\n".join(l for l in log_text.splitlines() if not l.startswith("@@PROGRESS@@"))
+    return {
+        "running": jobs.is_running(_BACKFILL_JOB),
+        "progress": progress,
+        "log": "\n".join(clean.splitlines()[-12:]),
+    }
 
 
 @app.post("/api/backfill/stop")

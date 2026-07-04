@@ -104,8 +104,11 @@ def fetch_month_revenue(client: FinMindClient, conn, stock_id: str, start: str, 
 def _update_log(conn, dataset: str, stock_id: str, dates: pd.Series) -> None:
     if dates.empty:
         return
-    last_date = str(dates.max())
-    db.set_last_date(conn, dataset, stock_id, last_date, dt.datetime.now().isoformat(timespec="seconds"))
+    db.merge_range(
+        conn, dataset, stock_id,
+        str(dates.min()), str(dates.max()),
+        dt.datetime.now().isoformat(timespec="seconds"),
+    )
 
 
 # ---- 股票池篩選 ----

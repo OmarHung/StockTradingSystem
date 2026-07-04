@@ -111,17 +111,26 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (as_of, stock_id)
         )
     """,
-    # 回補進度紀錄：記錄每檔每類資料已抓到的最新日期，供增量更新判斷
+    # 回補進度紀錄：記錄每檔每類資料「已補範圍」(first_date~last_date)，
+    # 供「最新優先」兩趟回補判斷缺口。
     "fetch_log": """
         CREATE TABLE IF NOT EXISTS fetch_log (
-            dataset   TEXT NOT NULL,
-            stock_id  TEXT NOT NULL,
-            last_date TEXT,
+            dataset    TEXT NOT NULL,
+            stock_id   TEXT NOT NULL,
+            first_date TEXT,
+            last_date  TEXT,
             updated_at TEXT,
             PRIMARY KEY (dataset, stock_id)
         )
     """,
 }
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """輕量遷移：舊 fetch_log 補上 first_date 欄位。"""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(fetch_log)").fetchall()]
+    if cols and "first_date" not in cols:
+        conn.execute("ALTER TABLE fetch_log ADD COLUMN first_date TEXT")
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -134,10 +143,11 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
 
 
 def init_db(db_path: str | Path) -> None:
-    """建立所有資料表（若不存在）。"""
+    """建立所有資料表（若不存在）並執行輕量遷移。"""
     with get_connection(db_path) as conn:
         for ddl in SCHEMA.values():
             conn.execute(ddl)
+        _migrate(conn)
         conn.commit()
 
 
@@ -192,11 +202,25 @@ def get_last_date(conn: sqlite3.Connection, dataset: str, stock_id: str) -> str 
     return row[0] if row else None
 
 
-def set_last_date(
-    conn: sqlite3.Connection, dataset: str, stock_id: str, last_date: str, updated_at: str
+def get_range(conn: sqlite3.Connection, dataset: str, stock_id: str) -> tuple[str | None, str | None]:
+    """回傳該檔該 dataset 已補的 (first_date, last_date)；無紀錄則 (None, None)。"""
+    row = conn.execute(
+        "SELECT first_date, last_date FROM fetch_log WHERE dataset=? AND stock_id=?",
+        (dataset, stock_id),
+    ).fetchone()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def merge_range(
+    conn: sqlite3.Connection, dataset: str, stock_id: str,
+    new_first: str, new_last: str, updated_at: str,
 ) -> None:
+    """把新抓到的 [new_first, new_last] 併入既有已補範圍（取聯集端點）。"""
+    old_first, old_last = get_range(conn, dataset, stock_id)
+    first = min(x for x in (old_first, new_first) if x)
+    last = max(x for x in (old_last, new_last) if x)
     conn.execute(
-        "INSERT OR REPLACE INTO fetch_log (dataset, stock_id, last_date, updated_at) "
-        "VALUES (?, ?, ?, ?)",
-        (dataset, stock_id, last_date, updated_at),
+        "INSERT OR REPLACE INTO fetch_log (dataset, stock_id, first_date, last_date, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (dataset, stock_id, first, last, updated_at),
     )

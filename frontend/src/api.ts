@@ -65,6 +65,10 @@ export const api = {
   initDb: () => post<{ status: string; tables: string[] }>("/init-db", {}),
   backfillStart: (body: { mode: string; start: string; stocks?: string; limit?: number; force: boolean }) =>
     post<{ started: boolean; running: boolean; cmd: string }>("/backfill/start", body),
-  backfillStatus: () => get<{ running: boolean; log: string }>("/backfill/status"),
+  backfillStatus: () => get<{
+    running: boolean;
+    progress: { pass: string; current: number; total: number; stock_id: string; rows: number } | null;
+    log: string;
+  }>("/backfill/status"),
   backfillStop: () => post<{ stopped: boolean }>("/backfill/stop", {}),
 };
