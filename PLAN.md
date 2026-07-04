@@ -44,9 +44,9 @@ CryptoTrade 的架構是：多個 LLM 分析師各自產出報告 → 交易員 
 ┌────────────────────────── Scheduler（每日排程）──────────────────────────┐
 │                                                                          │
 │  [1] Data Layer 資料層                                                    │
-│      price/volume（FinMind、TWSE/TPEX OpenAPI、yfinance 備援）              │
-│      籌碼（法人買賣超、融資券）、基本面（月營收、財報）、新聞（MOPS、財經 RSS）      │
-│      → SQLite/DuckDB 本地資料庫，每日盤後增量更新                             │
+│      price/volume（shioaji 主源、FinMind 指數+備援）                         │
+│      籌碼/除權息+預告/估值（TWSE/TPEx 官方主源）、月營收（MOPS 主源）            │
+│      → SQLite 本地資料庫，每日盤後增量更新（launchd 14:30）                    │
 │                                                                          │
 │  [2] Screener 智慧選股（量化初篩 → LLM 精選）                                │
 │      量化漏斗：流動性/非處置股 → 動能、籌碼、營收多因子評分 → Top 30             │
@@ -87,7 +87,7 @@ CryptoTrade 的架構是：多個 LLM 分析師各自產出報告 → 交易員 
 |---|---|---|
 | 語言 | Python 3.11+（已有 .venv） | |
 | 資料庫 | SQLite + Parquet（DuckDB 查詢） | 單機即可，免運維 |
-| 行情/籌碼/基本面 | **FinMind**（主）、TWSE/TPEX OpenAPI、yfinance（備援） | FinMind 免費額度夠日線級使用 |
+| 行情/籌碼/基本面 | **shioaji**（股價主源）、**TWSE/TPEx 官方**（籌碼/除權息+預告/估值主源）、**MOPS**（月營收主源）、FinMind（指數價格+全面備援，402 自動等待） | 官方源免額度、按日全市場；終局架構 2026-07-04 定案 |
 | 券商 API | **shioaji**（永豐金證券） | 台股最成熟 Python API，有模擬環境，紙上交易→實盤無縫切換 |
 | LLM | Claude API（analyst 用 Sonnet、trader/reflection 用進階模型），失敗自動 fallback | 結構化輸出 JSON；技術分析師走多模態（K 線圖 PNG） |
 | 向量記憶 | ChromaDB（本地） | 交易經驗/語意規則/被擋交易 三個 collection |
@@ -134,9 +134,10 @@ StockTradingSystem/
 - [x] **資料層 P0/P1 完善**（參照 MT5/看盤軟體）：除權息還原價（backward adj，選股/分析師已切換）、
   查詢時清洗（零價列剔除+open夾取）、品質檢查器（TAIEX 日曆缺日偵測+OHLC 異常）、
   大盤指數 TAIEX/TPEx、週K/月K 即時聚合、處置股官方名單（select_universe 排除生效）
-- 📌 資料層後續（P2/P3 已規劃未做）：TWSE 官方源 fallback、盤後自動排程+新鮮度警示、
+- 📌 資料層後續：~~TWSE 官方源 fallback~~（已升主源）、~~盤後自動排程~~（launchd dataupdate 已掛）、
   財報三表/借券/新聞、橫斷面索引、tick 級儲存（Parquet+DuckDB，Phase 5）
-- ⏳ 待辦：執行全市場 5 年完整回補（約需 1 小時、視 API 額度）
+- [x] 全市場回補完成（shioaji 股價 + 官方籌碼/除權息/估值，活股覆蓋接近 100%，
+  顯示 <100% 部分為 stock_info 內含已下市股票的分母虛胖）
 
 ### Phase 1：量化選股 + 回測環境 + WebUI v1（約 2 週）✅ 已完成
 - [x] 技術指標層 `src/indicators.py`（MA/MACD/RSI/KD/ATR/布林，純 pandas）
@@ -243,8 +244,18 @@ StockTradingSystem/
 | 即時報價串流（自選清單/五檔/下單面板） | 現為收盤基礎；Phase 6 前接 shioaji SSE |
 | tick/分鐘級儲存（Parquet+DuckDB） | Phase 6 實盤需要再做 |
 | 橫斷面索引 (date, stock_id) | 選股查詢變慢時再加 |
-| 財報三表/借券資料 | 基本面分析師火力升級 |
+| 財報三表/借券資料 | 基本面分析師火力升級（估值 PER/PBR/殖利率已接入，財報三表/借券仍缺） |
 | Streamlit legacy UI 移除 | React 已全面取代，留參考無害 |
+
+### 🎁 稽核後加碼完成（2026-07-04 ~ 07-05）
+- **除權息預告**：TWSE TWT48U_ALL + TPEx prepost 快照 → `dividend_forecast` 表，
+  回補時同步更新；基本面分析師 feats 帶 next_ex_date（避開/預期除權息跳空）
+- **股票總覽升級**：列表含開高低收/漲跌幅、當月除權息黃標（含金額）+ 專屬篩選；
+  點股票開整頁詳情（總覽/籌碼/基本面/除權息/資料覆蓋 五分頁 + 走勢/法人買賣超/
+  融資餘額/月營收/PER 圖表，/stocks/{id}/series 端點）
+- **K 線還原↔原始價切換**；資料健康報告事件型資料（除權息）不再誤報覆蓋率
+- **TLS 修正**：Python 3.13 VERIFY_X509_STRICT × TPEx 憑證缺 SKI = 先前所有
+  「TPEx 連線被拒」的真兇；twse_source._session + fetchers 處置股全數修復
 
 ### Phase 6（未開始）
 - LiveBroker（shioaji 實單 + CA 憑證簽署）、每日虧損上限即停、異常自動停機通知
