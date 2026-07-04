@@ -39,14 +39,25 @@ export interface BacktestResult {
   equity_curve: { time: string; value: number }[];
   trades: Record<string, unknown>[];
 }
+export interface ModelInfo {
+  id: string;
+  display_name: string;
+  context_window: number | null;
+  max_output: number | null;
+  supports_thinking: boolean;
+}
 
 export const api = {
   health: () => get<{ status: string; has_api_key: boolean }>("/health"),
   dataStatus: () => get<Record<string, unknown>[]>("/data-status"),
   stocks: () => get<{ stock_id: string; stock_name: string; industry_category: string }[]>("/stocks"),
   quote: (id: string) => get<Quote>(`/quote/${id}`),
-  price: (id: string, limit = 250) =>
-    get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}`),
+  price: (id: string, limit = 250, tf = "D") =>
+    get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}`),
+  indices: () => get<Quote[]>("/indices"),
+  qualityCheck: () => get<Record<string, any>>("/quality-check"),
+  disposition: (activeOn?: string) =>
+    get<Record<string, any>[]>(`/disposition${activeOn ? `?active_on=${activeOn}` : ""}`),
   screener: (asOf: string, topN = 30) =>
     get<ScreenerRow[]>(`/screener?as_of=${asOf}&top_n=${topN}`),
   backtest: (body: { strategy: string; start: string; end: string; cash: number; max_positions: number }) =>
@@ -56,6 +67,7 @@ export const api = {
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),
   brainLog: (limit = 100) => get<Record<string, any>[]>(`/brain-log?limit=${limit}`),
   // 設定
+  models: (topN = 5) => get<ModelInfo[]>(`/models?top_n=${topN}`),
   getConfig: () => get<Record<string, any>>("/config"),
   updateConfig: (section: string, values: Record<string, unknown>) =>
     put<{ status: string }>("/config", { section, values }),

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from src.config import get_settings
 from src.data import database as db
+from src.llm import models as model_caps
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -62,18 +63,21 @@ def call_structured(
     client = _client()
     models = [model] + [m for m in FALLBACK_CHAIN if m != model]
 
-    kwargs: dict = {}
-    if use_thinking:
-        # Opus 4.8 adaptive thinking；不可用 temperature/budget_tokens
-        kwargs["thinking"] = {"type": "adaptive"}
-        kwargs["output_config"] = {"effort": "high"}
-
     last_err: Exception | None = None
     for m in models:
+        # 依「該模型」能力決定參數：不支援 adaptive thinking 的模型（如 Haiku 4.5）
+        # 不可送 thinking/effort（會 400）；max_tokens 也夾在該模型的 output 上限內。
+        caps = model_caps.get_caps(m)
+        kwargs: dict = {}
+        if use_thinking and caps.get("supports_thinking"):
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": "high"}
+        cap_out = caps.get("max_output") or max_tokens
+        mt = min(max_tokens, cap_out)
         try:
             resp = client.messages.parse(
                 model=m,
-                max_tokens=max_tokens,
+                max_tokens=mt,
                 system=system,
                 messages=[{"role": "user", "content": user_prompt}],
                 output_format=schema,

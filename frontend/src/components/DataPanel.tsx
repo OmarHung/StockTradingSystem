@@ -13,6 +13,8 @@ export function DataPanel() {
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState("");
   const [prog, setProg] = useState<{ pass: string; current: number; total: number; stock_id: string; rows: number } | null>(null);
+  const [qc, setQc] = useState<Record<string, any> | null>(null);
+  const [qcLoading, setQcLoading] = useState(false);
   const poll = useRef<number | null>(null);
 
   const loadStatus = () => api.dataStatus().then(setStatus).catch(() => {});
@@ -35,10 +37,20 @@ export function DataPanel() {
   };
   const stop_ = async () => { await api.backfillStop(); };
   const init_ = async () => { await api.initDb(); loadStatus(); alert("資料庫已初始化"); };
+  const runQc = async () => {
+    setQcLoading(true);
+    try { setQc(await api.qualityCheck()); } catch (e) { alert(String(e)); }
+    finally { setQcLoading(false); }
+  };
 
   return (
     <Panel title="資料狀態" icon="📦"
-      right={<button className="btn" onClick={init_}>初始化資料庫</button>}>
+      right={
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn" onClick={runQc} disabled={qcLoading}>🩺 品質檢查</button>
+          <button className="btn" onClick={init_}>初始化資料庫</button>
+        </div>
+      }>
       <div style={{ padding: 8 }}>
         <table className="grid">
           <thead><tr><th>資料表</th><th>列數</th><th>股票數</th><th>起</th><th>迄</th></tr></thead>
@@ -96,6 +108,30 @@ export function DataPanel() {
 
         {log && <pre style={{ marginTop: 8, fontSize: 10, color: "var(--text-dim)", background: "#0d1119",
           padding: 8, borderRadius: 4, maxHeight: 100, overflow: "auto", whiteSpace: "pre-wrap" }}>{log}</pre>}
+
+        {qc && (
+          <div style={{ marginTop: 10, fontSize: 11, background: "#0d1119", borderRadius: 4, padding: 10 }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>🩺 資料品質報告</div>
+            {qc.error ? <div style={{ color: "var(--warning)" }}>{qc.error}</div> : (
+              <>
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "var(--text-dim)" }}>
+                  <span>交易日曆 <b style={{ color: "var(--text)" }}>{qc.calendar_days}</b> 天</span>
+                  <span>檢查 <b style={{ color: "var(--text)" }}>{qc.checked_stocks}</b> 檔</span>
+                  <span>缺日股票 <b className={qc.stocks_with_gaps > 0 ? "up" : "down"}>{qc.stocks_with_gaps}</b> 檔（共 {qc.total_missing_days} 天）</span>
+                  <span>零價列(已自動剔除) <b style={{ color: "var(--text)" }}>{qc.zero_price_rows}</b></span>
+                  <span>結構異常 <b className={qc.ohlc_anomalies > 0 ? "up" : "down"}>{qc.ohlc_anomalies}</b></span>
+                </div>
+                {qc.gap_samples?.length > 0 && (
+                  <div style={{ marginTop: 6, color: "var(--warning)" }}>
+                    缺日樣本：{qc.gap_samples.slice(0, 5).map((g: any) =>
+                      `${g.stock_id}(缺${g.missing}天)`).join("、")}
+                    <span style={{ color: "var(--text-dim)" }}>　→ 用「強制重抓」回補該檔即可修復</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Panel>
   );

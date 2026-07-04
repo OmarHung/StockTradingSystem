@@ -49,9 +49,9 @@ risk:
 
 # ---- LLM（Phase 2 生效）----
 llm:
-  analyst_model: claude-haiku-4-5-20251001
-  trader_model: claude-haiku-4-5-20251001
-  reflection_model: claude-haiku-4-5-20251001
+  analyst_model: claude-sonnet-4-6
+  trader_model: claude-sonnet-4-6
+  reflection_model: claude-sonnet-4-6
 
 # ---- 日誌 ----
 logging:

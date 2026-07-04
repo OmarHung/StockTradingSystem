@@ -87,6 +87,80 @@ def fetch_margin(client: FinMindClient, conn, stock_id: str, start: str, end: st
     return n
 
 
+# ---- 除權息 ----
+def fetch_dividend(client: FinMindClient, conn, stock_id: str, start: str, end: str) -> int:
+    raw = client.get_dataset(
+        "TaiwanStockDividendResult", data_id=stock_id, start_date=start, end_date=end
+    )
+    if raw.empty:
+        return 0
+    df = raw.rename(columns={
+        "stock_and_cache_dividend": "dividend",
+        "stock_or_cache_dividend": "kind",
+    })[["stock_id", "date", "before_price", "after_price", "dividend", "kind"]]
+    n = db.upsert_dataframe(conn, "dividend", df)
+    _update_log(conn, "dividend", stock_id, df["date"])
+    return n
+
+
+# ---- 處置股（TWSE/TPEx 官方 OpenAPI，全市場快照，免 token）----
+def _roc_to_iso(roc: str) -> str | None:
+    """民國日期 '1150703' 或 '115/07/03' → '2026-07-03'。"""
+    s = roc.strip().replace("/", "")
+    if len(s) != 7 or not s.isdigit():
+        return None
+    return f"{int(s[:3]) + 1911}-{s[3:5]}-{s[5:7]}"
+
+
+def fetch_disposition(conn) -> int:
+    """抓 TWSE + TPEx 當前處置股名單。全市場一次，冪等 upsert。"""
+    import requests
+
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    rows: list[dict] = []
+
+    try:
+        r = requests.get("https://openapi.twse.com.tw/v1/announcement/punish",
+                         timeout=20, headers={"accept": "application/json"})
+        for item in r.json():
+            period = (item.get("DispositionPeriod") or "").replace("～", "~")
+            parts = period.split("~")
+            rows.append({
+                "stock_id": item.get("Code", "").strip(),
+                "market": "twse", "name": item.get("Name", ""),
+                "reason": item.get("ReasonsOfDisposition", ""),
+                "period_start": _roc_to_iso(parts[0]) if parts else None,
+                "period_end": _roc_to_iso(parts[1]) if len(parts) > 1 else None,
+                "fetched_at": now,
+            })
+    except Exception as e:  # noqa: BLE001
+        log.error("TWSE 處置股抓取失敗：%s", e)
+
+    try:
+        r = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_disposal_information",
+                         timeout=20, headers={"accept": "application/json"})
+        for item in r.json():
+            period = (item.get("DispositionPeriod") or "").replace("～", "~")
+            parts = period.split("~")
+            rows.append({
+                "stock_id": item.get("SecuritiesCompanyCode", "").strip(),
+                "market": "tpex", "name": item.get("CompanyName", ""),
+                "reason": item.get("DispositionReasons", ""),
+                "period_start": _roc_to_iso(parts[0]) if parts else None,
+                "period_end": _roc_to_iso(parts[1]) if len(parts) > 1 else None,
+                "fetched_at": now,
+            })
+    except Exception as e:  # noqa: BLE001
+        log.error("TPEx 處置股抓取失敗：%s", e)
+
+    df = pd.DataFrame([r for r in rows if r["stock_id"] and r["period_start"]])
+    if df.empty:
+        return 0
+    n = db.upsert_dataframe(conn, "disposition", df)
+    log.info("處置股名單更新：%d 筆", n)
+    return n
+
+
 # ---- 月營收 ----
 def fetch_month_revenue(client: FinMindClient, conn, stock_id: str, start: str, end: str) -> int:
     raw = client.get_dataset(
@@ -112,11 +186,21 @@ def _update_log(conn, dataset: str, stock_id: str, dates: pd.Series) -> None:
 
 
 # ---- 股票池篩選 ----
+def current_disposition_ids(conn, as_of: str | None = None) -> set[str]:
+    """處置期間涵蓋 as_of（預設今天）的股票代號集合。"""
+    as_of = as_of or dt.date.today().isoformat()
+    df = db.read_sql(
+        conn,
+        "SELECT DISTINCT stock_id FROM disposition WHERE period_start<=? AND period_end>=?",
+        (as_of, as_of),
+    )
+    return set(df["stock_id"]) if not df.empty else set()
+
+
 def select_universe(conn, cfg) -> list[str]:
     """依 config 的 universe 條件，從 stock_info 選出要回補的股票代號清單。
 
-    Phase 0 先做結構性排除（市場別、代號長度、ETF）；處置股/全額交割股需事件資料，
-    於後續階段以獨立 dataset 強化（此處旗標保留但尚未生效）。
+    結構性排除（市場別、代號長度、ETF）+ 處置股排除（官方名單，旗標生效）。
     """
     u = cfg["universe"]
     df = db.read_sql(conn, "SELECT stock_id, stock_name, type, industry_category FROM stock_info")
@@ -134,5 +218,14 @@ def select_universe(conn, cfg) -> list[str]:
         mask &= df["industry_category"].fillna("") != "ETF"
 
     ids = sorted(df.loc[mask, "stock_id"].tolist())
+
+    # 處置股排除（旗標生效；名單由 fetch_disposition 維護）
+    if u.get("exclude_disposition", True):
+        bad = current_disposition_ids(conn)
+        if bad:
+            before = len(ids)
+            ids = [s for s in ids if s not in bad]
+            log.info("排除處置股 %d 檔", before - len(ids))
+
     log.info("股票池篩選：%d / %d 檔符合條件", len(ids), len(df))
     return ids

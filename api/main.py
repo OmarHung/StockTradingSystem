@@ -29,6 +29,7 @@ from src.config import get_settings  # noqa: E402
 from src.data import database as db  # noqa: E402
 from src.data import query as q  # noqa: E402
 from src.llm import client as llm  # noqa: E402
+from src.llm import models as llm_models  # noqa: E402
 from src.screener.screener import run_screener  # noqa: E402
 
 app = FastAPI(title="StockTradingSystem API", version="0.1.0")
@@ -47,6 +48,12 @@ def health():
     return {"status": "ok", "has_api_key": llm.has_api_key()}
 
 
+@app.get("/api/models")
+def models(top_n: int = 5):
+    """Claude 最新前 N 個模型與能力（供設定頁下拉切換）。"""
+    return llm_models.list_models(top_n=top_n)
+
+
 @app.get("/api/data-status")
 def data_status():
     return q.data_status().to_dict(orient="records")
@@ -61,11 +68,14 @@ def stocks():
 
 # ---------- 行情 ----------
 @app.get("/api/price/{stock_id}")
-def price(stock_id: str, start: str | None = None, end: str | None = None, limit: int = 250):
-    """日 K，格式對齊 TradingView lightweight-charts。"""
-    df = q.get_price(stock_id, start, end)
+def price(stock_id: str, start: str | None = None, end: str | None = None,
+          limit: int = 250, tf: str = "D", adjusted: bool = True):
+    """K 線（tf=D/W/M 多時間框架；adjusted=還原價，預設開）。格式對齊 lightweight-charts。"""
+    df = q.get_price(stock_id, start, end, adjusted=adjusted)
     if df.empty:
         return {"candles": [], "volume": []}
+    if tf in ("W", "M"):
+        df = q.resample_price(df, tf)
     df = df.tail(limit)
     candles = [
         {"time": r.date, "open": r.open, "high": r.high, "low": r.low, "close": r.close}
@@ -267,3 +277,34 @@ def backfill_status():
 @app.post("/api/backfill/stop")
 def backfill_stop():
     return {"stopped": jobs.stop_job(_BACKFILL_JOB)}
+
+
+@app.get("/api/quality-check")
+def quality_check():
+    """資料品質檢查：缺日偵測（對照 TAIEX 交易日曆）+ OHLC 結構異常。"""
+    return q.quality_check()
+
+
+@app.get("/api/indices")
+def indices():
+    """大盤指數報價（TAIEX 加權 / TPEx 櫃買），供頂部狀態列。"""
+    out = []
+    for sid, label in (("TAIEX", "加權"), ("TPEx", "櫃買")):
+        df = q.get_price(sid).tail(2)
+        if df.empty:
+            continue
+        last = float(df.iloc[-1]["close"])
+        prev = float(df.iloc[-2]["close"]) if len(df) > 1 else last
+        out.append({
+            "stock_id": sid, "name": label, "last": last,
+            "change": round(last - prev, 2),
+            "change_pct": round((last / prev - 1) * 100, 2) if prev else 0.0,
+            "date": df.iloc[-1]["date"],
+        })
+    return out
+
+
+@app.get("/api/disposition")
+def disposition(active_on: str | None = None):
+    """處置股名單（active_on 給日期則只回傳仍在處置期間者）。"""
+    return q.list_disposition(active_on).to_dict(orient="records")

@@ -23,7 +23,8 @@ def compute_factors(
     # 抓足夠長的價格窗（最長回看 + 緩衝）供動能/均線計算
     max_look = max(momentum_lookback + [60])
     price_start = _shift_days(as_of, max_look * 2 + 20)
-    prices = q.get_prices_bulk(stock_ids, price_start, as_of)
+    # 用除權息還原價算動能/均線，避免配息跳空被誤判為下跌
+    prices = q.get_prices_bulk(stock_ids, price_start, as_of, adjusted=True)
     inst = q.get_institutional_bulk(stock_ids, _shift_days(as_of, chips_lookback * 2 + 10), as_of)
     revenue = q.get_revenue_bulk(stock_ids, as_of)
 

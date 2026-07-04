@@ -33,7 +33,11 @@ FETCHERS = {
     "institutional": fetchers.fetch_institutional,
     "margin": fetchers.fetch_margin,
     "month_revenue": fetchers.fetch_month_revenue,
+    "dividend": fetchers.fetch_dividend,     # 除權息（還原價計算必需）
 }
+
+# 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補
+INDEX_IDS = ["TAIEX", "TPEx"]
 
 # 首次回補時，Pass 1「最新」先抓最近這麼多天（其餘留給 Pass 2 歷史）
 INITIAL_WINDOW_DAYS = 400
@@ -86,9 +90,12 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
 
     with db.connect(cfg.db_path) as conn:
         fetchers.fetch_stock_info(client, conn)
+        fetchers.fetch_disposition(conn)  # 官方處置股名單（全市場快照，免 token）
         targets = stocks if stocks else fetchers.select_universe(conn, cfg)
         if limit:
             targets = targets[:limit]
+        # 大盤指數一律優先回補（交易日曆/市場濾網基準）
+        targets = INDEX_IDS + [t for t in targets if t not in INDEX_IDS]
 
         total = len(targets)
         passes = [("最新", _newest_gap), ("歷史", _history_gap)]
@@ -104,13 +111,17 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
             for i, sid in enumerate(targets):
                 rows_this = 0
                 for name, fn in FETCHERS.items():
+                    # 指數只有價格資料，其餘 dataset 跳過（省 API 額度）
+                    if sid in INDEX_IDS and name != "price_daily":
+                        continue
                     first, last = (None, None) if force else db.get_range(conn, name, sid)
                     seg = gap_fn(first, last, default_start, end)
                     if not seg or seg[0] > seg[1]:
                         continue
                     try:
-                        rows_this += fn(client, conn, sid, seg[0], seg[1])
-                        totals[name] += rows_this
+                        n = fn(client, conn, sid, seg[0], seg[1])
+                        rows_this += n
+                        totals[name] += n
                     except Exception as e:  # noqa: BLE001 — 單檔失敗不中斷
                         log.error("回補 %s/%s 失敗：%s", name, sid, e)
                 conn.commit()

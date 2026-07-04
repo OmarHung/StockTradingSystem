@@ -78,6 +78,31 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, revenue_year, revenue_month)
         )
     """,
+    # 除權息結果（供還原價計算；factor = after_price / before_price）
+    "dividend": """
+        CREATE TABLE IF NOT EXISTS dividend (
+            stock_id      TEXT NOT NULL,
+            date          TEXT NOT NULL,   -- 除權息日
+            before_price  REAL,            -- 除權息前收盤
+            after_price   REAL,            -- 除權息參考價
+            dividend      REAL,            -- 配發金額/股數
+            kind          TEXT,            -- 息 / 權 / 權息
+            PRIMARY KEY (stock_id, date)
+        )
+    """,
+    # 處置/警示股名單（TWSE/TPEx 官方公告，含處置期間）
+    "disposition": """
+        CREATE TABLE IF NOT EXISTS disposition (
+            stock_id     TEXT NOT NULL,
+            market       TEXT,             -- twse / tpex
+            name         TEXT,
+            reason       TEXT,
+            period_start TEXT,             -- 處置期間（ISO 日期）
+            period_end   TEXT,
+            fetched_at   TEXT,
+            PRIMARY KEY (stock_id, period_start)
+        )
+    """,
     # LLM 呼叫記錄（供 WebUI「大腦活動」頁）
     "brain_log": """
         CREATE TABLE IF NOT EXISTS brain_log (

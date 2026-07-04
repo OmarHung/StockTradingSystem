@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, type ModelInfo } from "../api";
 
 type Tab = "capital" | "risk" | "screener" | "llm" | "keys";
 const TABS: { id: Tab; label: string }[] = [
@@ -15,11 +15,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("capital");
   const [cfg, setCfg] = useState<Record<string, any> | null>(null);
   const [env, setEnv] = useState<{ finmind_token: boolean; anthropic_key: boolean } | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [saved, setSaved] = useState("");
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch((e) => alert(String(e)));
     api.envStatus().then(setEnv).catch(() => {});
+    api.models().then(setModels).catch(() => {});
   }, []);
 
   const flash = (msg: string) => { setSaved(msg); setTimeout(() => setSaved(""), 2500); };
@@ -79,10 +81,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </>)}
 
           {tab === "llm" && (<>
-            <TextRow label="分析師模型" value={cfg.llm?.analyst_model} onChange={(v) => setField("llm", "analyst_model", v)} />
-            <TextRow label="交易員模型" value={cfg.llm?.trader_model} onChange={(v) => setField("llm", "trader_model", v)} />
-            <TextRow label="反思模型" value={cfg.llm?.reflection_model} onChange={(v) => setField("llm", "reflection_model", v)} />
-            <div className="form-hint" style={{ margin: 0 }}>例：claude-opus-4-8 / claude-sonnet-4-6 / claude-haiku-4-5</div>
+            <ModelRow label="分析師模型" value={cfg.llm?.analyst_model} models={models} onChange={(v) => setField("llm", "analyst_model", v)} />
+            <ModelRow label="交易員模型" value={cfg.llm?.trader_model} models={models} onChange={(v) => setField("llm", "trader_model", v)} />
+            <ModelRow label="反思模型" value={cfg.llm?.reflection_model} models={models} onChange={(v) => setField("llm", "reflection_model", v)} />
+            <div className="form-hint" style={{ margin: 0 }}>
+              清單為 Claude 最新前 5 個模型（即時查詢）。⚡ 表示支援思考模式；ctx 為上下文上限、out 為輸出上限。
+              交易員/反思建議選支援思考的模型；不支援思考者系統會自動關閉思考參數。
+            </div>
           </>)}
 
           {tab === "keys" && (
@@ -108,11 +113,32 @@ function NumRow({ label, value, step = 1, onChange }: { label: string; value: nu
     </div>
   );
 }
-function TextRow({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+const fmtTok = (n: number | null) =>
+  n == null ? "?" : n >= 1_000_000 ? `${n / 1_000_000}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n);
+
+function ModelRow({ label, value, models, onChange }: {
+  label: string; value: string; models: ModelInfo[]; onChange: (v: string) => void;
+}) {
+  // 若目前設定值不在最新清單（如帶日期尾碼的舊 id），仍保留為可選項，避免被清掉。
+  const known = models.some((m) => m.id === value);
+  const sel = models.find((m) => m.id === value);
   return (
-    <div className="form-row">
+    <div className="form-row" style={{ flexWrap: "wrap" }}>
       <label>{label}</label>
-      <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+        {!known && value && <option value={value}>{value}（自訂）</option>}
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.display_name} {m.supports_thinking ? "⚡" : ""} · ctx {fmtTok(m.context_window)} · out {fmtTok(m.max_output)}
+          </option>
+        ))}
+      </select>
+      {sel && (
+        <div className="form-hint" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
+          {sel.supports_thinking ? "⚡ 支援思考模式（adaptive thinking）" : "✕ 不支援思考模式，將以一般模式呼叫"}
+          {" · "}上下文上限 {fmtTok(sel.context_window)} tokens · 輸出上限 {fmtTok(sel.max_output)} tokens
+        </div>
+      )}
     </div>
   );
 }

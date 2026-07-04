@@ -16,8 +16,8 @@ from src.data import query as q
 
 
 def technical_features(stock_id: str, as_of: str) -> dict:
-    """技術面事實：收盤、均線、MACD、RSI、KD、ADX、量能百分位。"""
-    px = q.get_price(stock_id, end=as_of)
+    """技術面事實：收盤、均線、MACD、RSI、KD、ADX、量能百分位（還原價基礎）。"""
+    px = q.get_price(stock_id, end=as_of, adjusted=True)
     if len(px) < 60:
         return {}
     px = ind.add_indicators(px)

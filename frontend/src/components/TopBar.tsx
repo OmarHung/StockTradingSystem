@@ -5,11 +5,11 @@ import { fmt, cls } from "./Panel";
 /** 頂部狀態列：logo、環境、市場代表指標(0050)、時鐘、資料連線狀態、設定。 */
 export function TopBar({ hasKey, onOpenSettings }: { hasKey: boolean | null; onOpenSettings: () => void }) {
   const [now, setNow] = useState(new Date());
-  const [mkt, setMkt] = useState<Quote | null>(null);
+  const [indices, setIndices] = useState<Quote[]>([]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
-    api.quote("0050").then(setMkt).catch(() => {});
+    api.indices().then(setIndices).catch(() => {});
     return () => clearInterval(t);
   }, []);
 
@@ -17,15 +17,15 @@ export function TopBar({ hasKey, onOpenSettings }: { hasKey: boolean | null; onO
     <div className="topbar">
       <span className="logo">台股智慧交易終端</span>
       <span className="badge">研究 / 回測環境</span>
-      {mkt && (
-        <div className="ticker">
-          <span className="label">0050</span>
+      {indices.map((mkt) => (
+        <div className="ticker" key={mkt.stock_id}>
+          <span className="label">{mkt.name}</span>
           <span className={`val ${cls(mkt.change)}`}>{fmt(mkt.last)}</span>
           <span className={`val ${cls(mkt.change)}`} style={{ fontSize: 12 }}>
             {mkt.change_pct != null && mkt.change_pct > 0 ? "+" : ""}{fmt(mkt.change_pct)}%
           </span>
         </div>
-      )}
+      ))}
       <div className="spacer" />
       <span className="live"><span className="dot" />資料連線</span>
       <span className="badge" style={hasKey ? {} : { background: "#3a2a1a", color: "#f0b90b", borderColor: "#5a3a1a" }}>
