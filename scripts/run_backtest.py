@@ -17,7 +17,7 @@ from src.logging_setup import setup_logging
 def main() -> None:
     ap = argparse.ArgumentParser(description="策略回測")
     ap.add_argument("--strategy", default="screener",
-                    choices=["screener", "buy_and_hold", "ma_cross"])
+                    choices=["screener", "screener_risk", "buy_and_hold", "ma_cross"])
     ap.add_argument("--start", default="2022-06-01")
     ap.add_argument("--end", default="2025-06-30")
     ap.add_argument("--cash", type=float, default=None)

@@ -5,6 +5,7 @@ import { Panel, fmt } from "./Panel";
 
 const STRATS = [
   { v: "screener", label: "多因子選股" },
+  { v: "screener_risk", label: "多因子選股+風控(停損/大盤濾網)" },
   { v: "buy_and_hold", label: "買進持有0050" },
   { v: "ma_cross", label: "0050均線" },
 ];
