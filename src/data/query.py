@@ -225,6 +225,18 @@ def get_month_revenue(stock_id: str) -> pd.DataFrame:
         )
 
 
+def get_dividend_forecast(stock_id: str, after: str | None = None) -> pd.DataFrame:
+    """除權息預告（預定日 > after 的未來日程，日期升冪）。"""
+    sql = "SELECT * FROM dividend_forecast WHERE stock_id=?"
+    params: list = [stock_id]
+    if after:
+        sql += " AND date > ?"
+        params.append(after)
+    sql += " ORDER BY date"
+    with db.connect(_db_path()) as conn:
+        return db.read_sql(conn, sql, tuple(params))
+
+
 def get_valuation(stock_id: str) -> pd.DataFrame:
     """每日估值（本益比/股價淨值比/殖利率%），日期升冪。"""
     with db.connect(_db_path()) as conn:

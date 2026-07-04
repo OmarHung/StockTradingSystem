@@ -92,6 +92,15 @@ def fundamental_features(stock_id: str, as_of: str) -> dict:
         pers = val.tail(240)["per"].dropna()
         if len(pers) >= 60 and out["per"] is not None:
             out["per_percentile_1y"] = round(float((pers <= v["per"]).mean()), 2)
+    # 即將除權息（預告表）：進場前後撞到除權息日會有價格跳空
+    fc = q.get_dividend_forecast(stock_id, after=as_of)
+    if not fc.empty:
+        f = fc.iloc[0]
+        out.update({
+            "next_ex_date": f["date"],
+            "next_ex_kind": f["kind"],
+            "next_ex_cash_dividend": _f(f["cash_dividend"]),
+        })
     return out
 
 

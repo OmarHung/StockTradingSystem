@@ -89,6 +89,17 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, date)
         )
     """,
+    # 除權息預告（TWSE TWT48U_ALL / TPEx prepost 快照；未來除權息日程）
+    "dividend_forecast": """
+        CREATE TABLE IF NOT EXISTS dividend_forecast (
+            stock_id      TEXT NOT NULL,
+            date          TEXT NOT NULL,   -- 預定除權息日
+            kind          TEXT,            -- 息 / 權 / 權息
+            cash_dividend REAL,            -- 現金股利（元/股）
+            stock_ratio   REAL,            -- 無償配股率
+            PRIMARY KEY (stock_id, date)
+        )
+    """,
     # 除權息結果（供還原價計算；factor = after_price / before_price）
     "dividend": """
         CREATE TABLE IF NOT EXISTS dividend (

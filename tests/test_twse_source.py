@@ -88,3 +88,22 @@ def test_fetch_tpex_valuation_parses_fields(conn):
     assert n == 1
     r = conn.execute("SELECT per, pbr, dividend_yield FROM valuation WHERE stock_id='5483'").fetchone()
     assert r == (29.9, 2.62, 1.66)
+
+
+def test_fetch_dividend_forecast_both_markets(conn):
+    twse = [{"Date": "1150716", "Code": "1102", "Name": "亞泥", "Exdividend": "息",
+             "StockDividendRatio": "", "CashDividend": "2.300000"}]
+    tpex = [{"ExRrightsExDividendDate": "1150720", "SecuritiesCompanyCode": "5483",
+             "ExRrightsExDividend": "除息", "StockDividendRatio": "0.00000000",
+             "CashDividend": "7.00000000"}]
+    resps = [MagicMock(status_code=200), MagicMock(status_code=200)]
+    resps[0].json.return_value = twse
+    resps[1].json.return_value = tpex
+    with patch.object(twse_source._session, "get", side_effect=resps), \
+         patch.object(twse_source.time, "sleep"):
+        n = twse_source.fetch_dividend_forecast(conn)
+    assert n == 2
+    r = conn.execute("SELECT date, kind, cash_dividend FROM dividend_forecast WHERE stock_id='1102'").fetchone()
+    assert r == ("2026-07-16", "息", 2.3)
+    r = conn.execute("SELECT date, kind, cash_dividend FROM dividend_forecast WHERE stock_id='5483'").fetchone()
+    assert r == ("2026-07-20", "除息", 7.0)

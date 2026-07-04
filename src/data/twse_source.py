@@ -412,6 +412,52 @@ def fetch_tpex_dividends_range(conn, start_iso: str, end_iso: str) -> int:
     return db.upsert_dataframe(conn, "dividend", pd.DataFrame(rows))
 
 
+# ---------- 除權息預告（未來日程，兩市場 openapi 快照）----------
+def fetch_dividend_forecast(conn) -> int:
+    """上市 TWT48U_ALL + 上櫃 tpex_exright_prepost 除權息預告快照。
+
+    預告只需快照（歷史真值＝計算結果表），每次執行覆寫累積；
+    交易決策可據此避開/預期即將除權息的標的。單市場失敗不中斷。
+    """
+    rows = []
+    # 上市（openapi.twse.com.tw，欄位依官方 swagger）
+    try:
+        r = _session.get("https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL",
+                         headers=_HEADERS, timeout=30)
+        if r.status_code == 200:
+            for d in r.json():
+                sid = str(d.get("Code", "")).strip()
+                date = _any_date(d.get("Date", ""))
+                if not sid or not date:
+                    continue
+                rows.append({"stock_id": sid, "date": date,
+                             "kind": str(d.get("Exdividend", "")).strip(),
+                             "cash_dividend": _fnum(d.get("CashDividend")),
+                             "stock_ratio": _fnum(d.get("StockDividendRatio"))})
+    except Exception as e:  # noqa: BLE001
+        log.warning("除權息預告 TWSE 失敗：%s", str(e)[:80])
+    time.sleep(2)
+    # 上櫃
+    try:
+        r = _session.get("https://www.tpex.org.tw/openapi/v1/tpex_exright_prepost",
+                         headers=_HEADERS, timeout=30)
+        if r.status_code == 200:
+            for d in r.json():
+                sid = str(d.get("SecuritiesCompanyCode", "")).strip()
+                date = _any_date(d.get("ExRrightsExDividendDate", ""))
+                if not sid or not date:
+                    continue
+                rows.append({"stock_id": sid, "date": date,
+                             "kind": str(d.get("ExRrightsExDividend", "")).strip(),
+                             "cash_dividend": _fnum(d.get("CashDividend")),
+                             "stock_ratio": _fnum(d.get("StockDividendRatio"))})
+    except Exception as e:  # noqa: BLE001
+        log.warning("除權息預告 TPEx 失敗：%s", str(e)[:80])
+    if not rows:
+        return 0
+    return db.upsert_dataframe(conn, "dividend_forecast", pd.DataFrame(rows))
+
+
 # ---------- 每日估值指標（本益比/殖利率/股價淨值比）----------
 def fetch_twse_valuation(conn, date_iso: str) -> int:
     """TWSE BWIBBU_d：上市全市場單日估值（歷史按日可查）。"""

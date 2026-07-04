@@ -471,6 +471,10 @@ def _official_dividend_backfill(conn, start: str, end: str) -> dict:
         except Exception as ex:  # noqa: BLE001
             log.warning("除權息官方源 %s 失敗（該市場維持 FinMind）：%s", mkt, str(ex)[:100])
             counts[mkt] = -1
+    # 除權息預告（未來日程快照，供決策避開/預期即將除權息標的）
+    n_fc = twse_source.fetch_dividend_forecast(conn)
+    if n_fc:
+        log.info("除權息預告更新 %d 筆", n_fc)
     conn.commit()
     return counts
 

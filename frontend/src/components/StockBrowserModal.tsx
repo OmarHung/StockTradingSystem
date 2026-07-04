@@ -198,6 +198,13 @@ export function StockBrowserModal({ onClose, onSelect }: {
                         <span style={{ color: "var(--text-dim)" }}>本益比近一年位階</span>
                         <span className="mono">{fmt(d.fundamental.per_percentile_1y * 100, 0)}%</span>
                       </div>)}
+                    {d.fundamental?.next_ex_date != null && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
+                        <span style={{ color: "var(--text-dim)" }}>⏰ 即將除{d.fundamental.next_ex_kind ?? "權息"}</span>
+                        <span className="mono" style={{ color: "var(--accent-yellow, #f0b90b)" }}>
+                          {d.fundamental.next_ex_date}{d.fundamental.next_ex_cash_dividend != null ? `　${fmt(d.fundamental.next_ex_cash_dividend, 2)} 元` : ""}
+                        </span>
+                      </div>)}
                   </div>
                 )}
               </div>

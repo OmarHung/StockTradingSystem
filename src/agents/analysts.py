@@ -76,6 +76,8 @@ def run_fundamental(stock_id: str, as_of: str) -> tuple[FundamentalReport | None
         "估值欄位：per=本益比（虧損公司為 null）、pbr=股價淨值比、"
         "dividend_yield_pct=殖利率(%)、per_percentile_1y=本益比近一年百分位"
         "（0=一年最便宜，1=一年最貴）。"
+        "若有 next_ex_date（即將除權息日）請納入考量：除權息日股價會跳空調整，"
+        "臨近進場需留意息值大小與填息能力。"
     )
     prompt = (
         f"股票代號 {stock_id}，基準日 {as_of}。月營收與估值數據：\n"
