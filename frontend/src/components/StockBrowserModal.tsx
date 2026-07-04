@@ -11,8 +11,24 @@ interface Row {
 }
 
 const MAX_SHOW = 400;
+const TABS = [
+  { key: "overview", label: "總覽" },
+  { key: "chips", label: "籌碼" },
+  { key: "fund", label: "基本面" },
+  { key: "coverage", label: "資料覆蓋" },
+];
 
-/** 股票總覽瀏覽器：全市場（含未下載/處置）分類、篩選、搜尋；點列看詳細數據。 */
+/** 明細列（label 左、值右） */
+function Item({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 2px", fontSize: 12, borderBottom: "1px solid var(--border)" }}>
+      <span style={{ color: "var(--text-dim)" }}>{label}</span>
+      <span className="mono">{value}</span>
+    </div>
+  );
+}
+
+/** 股票總覽瀏覽器：全市場列表（開高低收/漲跌幅）；點股票切換成整頁詳情＋分頁。 */
 export function StockBrowserModal({ onClose, onSelect }: {
   onClose: () => void; onSelect: (id: string) => void;
 }) {
@@ -24,6 +40,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [picked, setPicked] = useState("");
+  const [tab, setTab] = useState("overview");
 
   useEffect(() => {
     api.stocksOverview().then((r) => setRows(r as Row[])).catch((e) => alert(String(e)));
@@ -46,26 +63,43 @@ export function StockBrowserModal({ onClose, onSelect }: {
   }, [rows, q, market, industry, status]);
 
   const pick = async (id: string) => {
-    setPicked(id); setDetailLoading(true);
+    setPicked(id); setDetailLoading(true); setTab("overview");
     try { setDetail(await api.stockDetail(id)); }
     catch (e) { alert(String(e)); }
     finally { setDetailLoading(false); }
   };
-  const closeDetail = () => { setPicked(""); setDetail(null); };
+  const backToList = () => { setPicked(""); setDetail(null); };
   const showDetail = picked !== "";
-
   const d = detail;
+  const f = d?.fundamental ?? {};
+  const c = d?.chips ?? {};
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ width: 960, maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>🗂 股票總覽</span>
-          <span style={{ marginLeft: 10, fontSize: 11, color: "var(--text-dim)" }}>
-            共 {rows.length} 檔・符合 {filtered.length} 檔
-          </span>
+          {showDetail
+            ? <>
+                <button className="btn" style={{ fontSize: 11, marginRight: 8 }} onClick={backToList}>← 返回列表</button>
+                <span>🗂 {picked} {d?.name ?? ""}</span>
+                <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-dim)" }}>
+                  {d ? `${d.market === "twse" ? "上市" : "上櫃"}・${d.industry}` : ""}
+                </span>
+                <div style={{ flex: 1 }} />
+                {d && <button className="btn primary" style={{ fontSize: 11, marginRight: 10 }}
+                  onClick={() => { onSelect(d.stock_id); onClose(); }}>📈 開啟K線</button>}
+              </>
+            : <>
+                <span>🗂 股票總覽</span>
+                <span style={{ marginLeft: 10, fontSize: 11, color: "var(--text-dim)" }}>
+                  共 {rows.length} 檔・符合 {filtered.length} 檔
+                </span>
+              </>}
           <span className="close" onClick={onClose}>✕</span>
         </div>
 
+        {!showDetail && (
+        <>
         {/* 篩選列 */}
         <div style={{ display: "flex", gap: 6, padding: "10px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
           <input placeholder="🔍 代號 / 名稱" value={q} onChange={(e) => setQ(e.target.value)}
@@ -87,9 +121,9 @@ export function StockBrowserModal({ onClose, onSelect }: {
           </select>
         </div>
 
-        <div className="modal-body" style={{ display: "flex", gap: 12, padding: 12 }}>
-          {/* 列表（未點選詳情時滿版，欄位含開高低收/漲跌幅） */}
-          <div style={{ flex: showDetail ? "1 1 55%" : "1 1 100%", overflow: "auto", maxHeight: "62vh" }}>
+        {/* 列表 */}
+        <div className="modal-body" style={{ padding: 12 }}>
+          <div style={{ overflow: "auto", maxHeight: "66vh" }}>
             <table className="grid" style={{ whiteSpace: "nowrap" }}>
               <thead><tr>
                 <th>代號</th><th>名稱</th>
@@ -104,8 +138,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
               </tr></thead>
               <tbody>
                 {filtered.slice(0, MAX_SHOW).map((r) => (
-                  <tr key={r.stock_id} className={r.stock_id === picked ? "active" : ""}
-                      onClick={() => pick(r.stock_id)} style={{ cursor: "pointer" }}>
+                  <tr key={r.stock_id} onClick={() => pick(r.stock_id)} style={{ cursor: "pointer" }}>
                     <td><b>{r.stock_id}</b></td>
                     <td>{r.name}</td>
                     <td className="mono" style={{ textAlign: "right" }}>{r.close != null ? fmt(r.close) : "—"}</td>
@@ -132,105 +165,121 @@ export function StockBrowserModal({ onClose, onSelect }: {
               <div className="empty-hint">僅顯示前 {MAX_SHOW} 檔，請用篩選/搜尋縮小範圍</div>
             )}
           </div>
+        </div>
+        </>
+        )}
 
-          {/* 詳細數據（點選股票後才顯示） */}
-          {showDetail && (
-          <div style={{ flex: "1 1 45%", overflow: "auto", maxHeight: "62vh" }}>
-            {detailLoading && <div className="spinner">載入中…</div>}
-            {d && !detailLoading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <b style={{ fontSize: 16 }}>{d.stock_id} {d.name}</b>
-                  <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
-                    {d.market === "twse" ? "上市" : "上櫃"}・{d.industry}
-                  </span>
-                  <div style={{ flex: 1 }} />
-                  <button className="btn primary" style={{ fontSize: 11 }}
-                    onClick={() => { onSelect(d.stock_id); onClose(); }}>📈 開啟K線</button>
-                  <button className="btn" style={{ fontSize: 11 }} onClick={closeDetail}>✕</button>
-                </div>
-
-                {d.disposition && (
-                  <div style={{ padding: "6px 10px", borderRadius: 4, background: "rgba(255,67,61,0.1)",
-                    border: "1px solid var(--up)", color: "var(--up)", fontSize: 11 }}>
-                    ⚠️ 處置中（{d.disposition.period_start} ~ {d.disposition.period_end}）：
-                    {String(d.disposition.reason).slice(0, 60)}
-                  </div>
-                )}
-
-                {d.quote && (
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {[["收盤(還原)", fmt(d.quote.close)],
-                      ["漲跌", <span className={cls(d.quote.change_pct)}>{d.quote.change_pct > 0 ? "+" : ""}{fmt(d.quote.change_pct)}%</span>],
-                      ["量(股)", Number(d.quote.volume).toLocaleString()],
-                      ["日期", d.quote.date]].map(([l, v], i) => (
-                      <div key={i} className="metric" style={{ flex: 1, padding: "4px 8px" }}>
-                        <span className="m-label">{l as string}</span>
-                        <span className="m-value" style={{ fontSize: 12 }}>{v as any}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ background: "#0d1119", borderRadius: 4, padding: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>📦 資料覆蓋</div>
-                  {Object.values(d.coverage ?? {}).map((c: any) => (
-                    <div key={c.label} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
-                      <span style={{ color: "var(--text-dim)" }}>{c.label}</span>
-                      <span className="mono">{c.rows > 0 ? `${c.rows.toLocaleString()} 列　${c.from ?? ""}${c.from ? "~" : ""}${c.to ?? ""}` : "無資料"}</span>
+        {showDetail && (
+        <div className="modal-body" style={{ padding: "0 16px 16px" }}>
+          {detailLoading && <div className="spinner">載入中…</div>}
+          {d && !detailLoading && (
+            <>
+              {/* 報價帶 */}
+              {d.quote && (
+                <div style={{ display: "flex", gap: 6, padding: "12px 0 8px" }}>
+                  {[["收盤(還原)", <b style={{ fontSize: 16 }}>{fmt(d.quote.close)}</b>],
+                    ["漲跌", <span className={cls(d.quote.change_pct)} style={{ fontSize: 14 }}>{d.quote.change_pct > 0 ? "+" : ""}{fmt(d.quote.change_pct)}%</span>],
+                    ["成交量(股)", Number(d.quote.volume).toLocaleString()],
+                    ["資料日期", d.quote.date]].map(([l, v], i) => (
+                    <div key={i} className="metric" style={{ flex: 1, padding: "6px 10px" }}>
+                      <span className="m-label">{l as string}</span>
+                      <span className="m-value" style={{ fontSize: 13 }}>{v as any}</span>
                     </div>
                   ))}
                 </div>
+              )}
 
-                {(d.chips || d.margin || d.fundamental) && (
-                  <div style={{ background: "#0d1119", borderRadius: 4, padding: 8 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>📊 最新關鍵數據</div>
-                    {d.chips?.foreign_net_5d != null && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>外資近5日淨買(股)</span>
-                        <span className={`mono ${cls(d.chips.foreign_net_5d)}`}>{Number(d.chips.foreign_net_5d).toLocaleString()}</span>
-                      </div>)}
-                    {d.chips?.trust_net_5d != null && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>投信近5日淨買(股)</span>
-                        <span className={`mono ${cls(d.chips.trust_net_5d)}`}>{Number(d.chips.trust_net_5d).toLocaleString()}</span>
-                      </div>)}
-                    {d.margin && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>融資餘額(張) / 融券(張)</span>
-                        <span className="mono">{Number(d.margin.margin_purchase_balance).toLocaleString()} / {Number(d.margin.short_sale_balance).toLocaleString()}</span>
-                      </div>)}
-                    {d.fundamental?.revenue_yoy != null && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>最新月營收 YoY</span>
-                        <span className={`mono ${cls(d.fundamental.revenue_yoy)}`}>{fmt(d.fundamental.revenue_yoy * 100, 1)}%</span>
-                      </div>)}
-                    {(d.fundamental?.per != null || d.fundamental?.pbr != null) && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>本益比 / 淨值比 / 殖利率</span>
-                        <span className="mono">
-                          {d.fundamental.per != null ? fmt(d.fundamental.per, 1) : "—"} / {d.fundamental.pbr != null ? fmt(d.fundamental.pbr, 2) : "—"} / {d.fundamental.dividend_yield_pct != null ? `${fmt(d.fundamental.dividend_yield_pct, 2)}%` : "—"}
-                        </span>
-                      </div>)}
-                    {d.fundamental?.per_percentile_1y != null && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>本益比近一年位階</span>
-                        <span className="mono">{fmt(d.fundamental.per_percentile_1y * 100, 0)}%</span>
-                      </div>)}
-                    {d.fundamental?.next_ex_date != null && (
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-                        <span style={{ color: "var(--text-dim)" }}>⏰ 即將除{d.fundamental.next_ex_kind ?? "權息"}</span>
-                        <span className="mono" style={{ color: "var(--accent-yellow, #f0b90b)" }}>
-                          {d.fundamental.next_ex_date}{d.fundamental.next_ex_cash_dividend != null ? `　${fmt(d.fundamental.next_ex_cash_dividend, 2)} 元` : ""}
-                        </span>
-                      </div>)}
+              {d.disposition && (
+                <div style={{ padding: "6px 10px", borderRadius: 4, background: "rgba(255,67,61,0.1)",
+                  border: "1px solid var(--up)", color: "var(--up)", fontSize: 11, marginBottom: 8 }}>
+                  ⚠️ 處置中（{d.disposition.period_start} ~ {d.disposition.period_end}）：
+                  {String(d.disposition.reason).slice(0, 80)}
+                </div>
+              )}
+
+              {/* 分頁列 */}
+              <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
+                {TABS.map((t) => (
+                  <div key={t.key} onClick={() => setTab(t.key)}
+                    style={{
+                      padding: "8px 18px", cursor: "pointer", fontSize: 12,
+                      color: tab === t.key ? "var(--text)" : "var(--text-dim)",
+                      borderBottom: tab === t.key ? "2px solid #2962ff" : "2px solid transparent",
+                      fontWeight: tab === t.key ? 600 : 400,
+                    }}>{t.label}</div>
+                ))}
+              </div>
+
+              <div style={{ maxHeight: "48vh", overflow: "auto", paddingTop: 4 }}>
+                {tab === "overview" && (
+                  <div>
+                    <Item label="外資近5日淨買(股)" value={c.foreign_net_5d != null
+                      ? <span className={cls(c.foreign_net_5d)}>{Number(c.foreign_net_5d).toLocaleString()}</span> : "—"} />
+                    <Item label="投信近5日淨買(股)" value={c.trust_net_5d != null
+                      ? <span className={cls(c.trust_net_5d)}>{Number(c.trust_net_5d).toLocaleString()}</span> : "—"} />
+                    <Item label="最新月營收 YoY" value={f.revenue_yoy != null
+                      ? <span className={cls(f.revenue_yoy)}>{fmt(f.revenue_yoy * 100, 1)}%</span> : "—"} />
+                    <Item label="本益比 / 淨值比 / 殖利率" value={
+                      `${f.per != null ? fmt(f.per, 1) : "—"} / ${f.pbr != null ? fmt(f.pbr, 2) : "—"} / ${f.dividend_yield_pct != null ? fmt(f.dividend_yield_pct, 2) + "%" : "—"}`} />
+                    {f.next_ex_date != null && (
+                      <Item label={`⏰ 即將除${f.next_ex_kind ?? "權息"}`} value={
+                        <span style={{ color: "#f0b90b" }}>
+                          {f.next_ex_date}{f.next_ex_cash_dividend != null ? `　${fmt(f.next_ex_cash_dividend, 2)} 元` : ""}
+                        </span>} />
+                    )}
+                  </div>
+                )}
+
+                {tab === "chips" && (
+                  <div>
+                    <Item label="外資近5日淨買(股)" value={c.foreign_net_5d != null
+                      ? <span className={cls(c.foreign_net_5d)}>{Number(c.foreign_net_5d).toLocaleString()}</span> : "—"} />
+                    <Item label="投信近5日淨買(股)" value={c.trust_net_5d != null
+                      ? <span className={cls(c.trust_net_5d)}>{Number(c.trust_net_5d).toLocaleString()}</span> : "—"} />
+                    <Item label="自營商近5日淨買(股)" value={c.dealer_net_5d != null
+                      ? <span className={cls(c.dealer_net_5d)}>{Number(c.dealer_net_5d).toLocaleString()}</span> : "—"} />
+                    <Item label="融資餘額(張)" value={d.margin ? Number(d.margin.margin_purchase_balance).toLocaleString() : "—"} />
+                    <Item label="融券餘額(張)" value={d.margin ? Number(d.margin.short_sale_balance).toLocaleString() : "—"} />
+                    <Item label="融資券資料日期" value={d.margin?.date ?? "—"} />
+                  </div>
+                )}
+
+                {tab === "fund" && (
+                  <div>
+                    <Item label="最新月營收(元)" value={f.latest_revenue != null
+                      ? Number(f.latest_revenue).toLocaleString() : "—"} />
+                    <Item label="營收月份" value={f.latest_revenue_year != null
+                      ? `${f.latest_revenue_year}-${String(f.latest_revenue_month).padStart(2, "0")}` : "—"} />
+                    <Item label="月營收 YoY" value={f.revenue_yoy != null
+                      ? <span className={cls(f.revenue_yoy)}>{fmt(f.revenue_yoy * 100, 1)}%</span> : "—"} />
+                    <Item label="本益比 (PER)" value={f.per != null ? fmt(f.per, 2) : "—（虧損或無資料）"} />
+                    <Item label="股價淨值比 (PBR)" value={f.pbr != null ? fmt(f.pbr, 2) : "—"} />
+                    <Item label="殖利率" value={f.dividend_yield_pct != null ? `${fmt(f.dividend_yield_pct, 2)}%` : "—"} />
+                    <Item label="本益比近一年位階" value={f.per_percentile_1y != null
+                      ? `${fmt(f.per_percentile_1y * 100, 0)}%（0=最便宜）` : "—（估值歷史不足一年）"} />
+                    <Item label="估值資料日期" value={f.valuation_date ?? "—"} />
+                    {f.next_ex_date != null && (
+                      <Item label={`⏰ 即將除${f.next_ex_kind ?? "權息"}`} value={
+                        <span style={{ color: "#f0b90b" }}>
+                          {f.next_ex_date}{f.next_ex_cash_dividend != null ? `　${fmt(f.next_ex_cash_dividend, 2)} 元` : ""}
+                        </span>} />
+                    )}
+                  </div>
+                )}
+
+                {tab === "coverage" && (
+                  <div>
+                    {Object.values(d.coverage ?? {}).map((cv: any) => (
+                      <Item key={cv.label} label={cv.label} value={
+                        cv.rows > 0 ? `${cv.rows.toLocaleString()} 列　${cv.from ?? ""}${cv.from ? "~" : ""}${cv.to ?? ""}` : "無資料"} />
+                    ))}
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </>
           )}
         </div>
+        )}
       </div>
     </div>
   );
