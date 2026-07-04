@@ -20,6 +20,25 @@ export function Panel({
   );
 }
 
+/** 自選星星切換按鈕：實心=已加入、空心=未加入。點擊不冒泡到列的 onClick。 */
+export function StarButton({
+  active, onToggle, size = 15,
+}: { active: boolean; onToggle: () => void; size?: number }) {
+  return (
+    <span
+      role="button"
+      title={active ? "移除自選" : "加入自選"}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      style={{
+        cursor: "pointer", fontSize: size, lineHeight: 1,
+        color: active ? "#f5c518" : "var(--text-dim)", userSelect: "none",
+      }}
+    >
+      {active ? "★" : "☆"}
+    </span>
+  );
+}
+
 export function fmt(n: number | null | undefined, digits = 2): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });

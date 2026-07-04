@@ -32,12 +32,23 @@ export default function App() {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showData, setShowData] = useState(false);
+  const [watchIds, setWatchIds] = useState<string[]>([]);
 
   const { width, containerRef } = useContainerWidth();
 
   const refreshKey = () => api.health().then((h) => setHasKey(h.has_api_key)).catch(() => setHasKey(false));
   useEffect(() => { refreshKey(); }, []);
+  useEffect(() => { api.watchlist().then(setWatchIds).catch(() => {}); }, []);
   useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
+
+  // 自選加入/移除（後端落庫，回傳更新後清單）
+  const isWatched = (id: string) => watchIds.includes(id);
+  const toggleWatch = async (id: string) => {
+    try {
+      const next = isWatched(id) ? await api.watchlistRemove(id) : await api.watchlistAdd(id);
+      setWatchIds(next);
+    } catch (e) { console.error(e); }
+  };
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -54,9 +65,18 @@ export default function App() {
           gridConfig={{ cols: 12, rowHeight: 48, margin: [8, 8] }}
           dragConfig={{ handle: ".panel-drag-handle" }}
         >
-          <div key="watchlist"><Watchlist selected={selected} onSelect={setSelected} /></div>
-          <div key="kchart"><KChart stockId={selected} name={name} /></div>
-          <div key="screener"><ScreenerPanel onSelect={setSelected} /></div>
+          <div key="watchlist">
+            <Watchlist ids={watchIds} selected={selected}
+              onSelect={setSelected} onToggleWatch={toggleWatch} />
+          </div>
+          <div key="kchart">
+            <KChart stockId={selected} name={name}
+              watched={isWatched(selected)} onToggleWatch={() => toggleWatch(selected)} />
+          </div>
+          <div key="screener">
+            <ScreenerPanel onSelect={setSelected}
+              isWatched={isWatched} onToggleWatch={toggleWatch} />
+          </div>
           <div key="report"><ReportPanel hasKey={!!hasKey} onSelect={setSelected} /></div>
           <div key="backtest"><BacktestPanel /></div>
           <div key="brain"><BrainPanel /></div>

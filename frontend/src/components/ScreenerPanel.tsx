@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, type ScreenerRow } from "../api";
-import { Panel, fmt, cls } from "./Panel";
+import { Panel, fmt, cls, StarButton } from "./Panel";
 
-/** 智慧選股面板：跑量化多因子初篩，點列可切換主圖。 */
-export function ScreenerPanel({ onSelect }: { onSelect: (id: string) => void }) {
+/** 智慧選股面板：跑量化多因子初篩，點列可切換主圖，星星可加入自選。 */
+export function ScreenerPanel({
+  onSelect, isWatched, onToggleWatch,
+}: {
+  onSelect: (id: string) => void;
+  isWatched: (id: string) => boolean;
+  onToggleWatch: (id: string) => void;
+}) {
   const [asOf, setAsOf] = useState("");
   const [rows, setRows] = useState<ScreenerRow[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -55,11 +61,14 @@ export function ScreenerPanel({ onSelect }: { onSelect: (id: string) => void }) 
       {loading ? <div className="spinner">量化初篩中…</div> : (
         <table className="grid">
           <thead>
-            <tr><th>#</th><th>代碼</th><th>股名</th><th>綜合分</th><th>動能20</th><th>法人淨買</th><th>營收YoY</th></tr>
+            <tr><th></th><th>#</th><th>代碼</th><th>股名</th><th>綜合分</th><th>動能20</th><th>法人淨買</th><th>營收YoY</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.stock_id} onClick={() => onSelect(r.stock_id)} style={{ cursor: "pointer" }}>
+                <td style={{ textAlign: "center" }}>
+                  <StarButton active={isWatched(r.stock_id)} onToggle={() => onToggleWatch(r.stock_id)} />
+                </td>
                 <td>{r.rank}</td>
                 <td><b>{r.stock_id}</b></td>
                 <td>{r.stock_name}</td>
@@ -69,7 +78,7 @@ export function ScreenerPanel({ onSelect }: { onSelect: (id: string) => void }) 
                 <td className={`mono ${cls(r.revenue_yoy)}`}>{r.revenue_yoy != null ? fmt(r.revenue_yoy * 100, 1) + "%" : "—"}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={7} className="empty-hint">選日期後按「執行」</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={8} className="empty-hint">選日期後按「執行」</td></tr>}
           </tbody>
         </table>
       )}

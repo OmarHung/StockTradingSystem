@@ -4,7 +4,7 @@ import {
   type IChartApi, type Time,
 } from "lightweight-charts";
 import { api } from "../api";
-import { Panel } from "./Panel";
+import { Panel, StarButton } from "./Panel";
 
 const TFS = [
   { v: "D", label: "日" },
@@ -13,7 +13,11 @@ const TFS = [
 ];
 
 /** K 線圖（lightweight-charts v5）。台股紅漲綠跌；還原價；日/週/月切換。 */
-export function KChart({ stockId, name }: { stockId: string; name: string }) {
+export function KChart({
+  stockId, name, watched, onToggleWatch,
+}: {
+  stockId: string; name: string; watched: boolean; onToggleWatch: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [tf, setTf] = useState("D");
@@ -62,13 +66,16 @@ export function KChart({ stockId, name }: { stockId: string; name: string }) {
   return (
     <Panel title={`K 線圖 · ${stockId}`} icon="📈" sub={`${name} · 還原價`}
       right={
-        <div style={{ display: "flex", gap: 2 }}>
-          {TFS.map((t) => (
-            <button key={t.v} className="btn" onClick={() => setTf(t.v)}
-              style={tf === t.v ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}}>
-              {t.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <StarButton active={watched} onToggle={onToggleWatch} size={17} />
+          <div style={{ display: "flex", gap: 2 }}>
+            {TFS.map((t) => (
+              <button key={t.v} className="btn" onClick={() => setTf(t.v)}
+                style={tf === t.v ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}}>
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       }>
       <div ref={ref} style={{ width: "100%", height: "100%" }} />
