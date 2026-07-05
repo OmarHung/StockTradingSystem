@@ -252,6 +252,38 @@ def _update_log(conn, dataset: str, stock_id: str, dates: pd.Series) -> None:
     )
 
 
+def mark_delisted(conn) -> int:
+    """以 shioaji 可交易合約為準，標記 stock_info 的下市股。回傳本次新標記檔數。
+
+    只檢查純數字代號（指數等特殊代號不動）；重新上市者會自動解除標記。
+    合約清單抓不到（空集合）時不動作，避免誤殺全表。
+    """
+    from src.data import shioaji_source
+    if not shioaji_source.available():
+        return 0
+    try:
+        tradable = shioaji_source.list_tradable_ids()
+    except Exception as e:  # noqa: BLE001
+        log.warning("shioaji 合約清單抓取失敗，跳過下市標記：%s", e)
+        return 0
+    if len(tradable) < 2000:   # 全市場股票+ETF 約 2800 檔，過少＝清單不完整
+        log.warning("shioaji 合約清單過少（%d 檔），跳過下市標記", len(tradable))
+        return 0
+    rows = conn.execute("SELECT stock_id, COALESCE(delisted,0) FROM stock_info").fetchall()
+    newly = 0
+    for sid, old in rows:
+        if not sid.isdigit():
+            continue
+        flag = 0 if sid in tradable else 1
+        if flag != old:
+            conn.execute("UPDATE stock_info SET delisted=? WHERE stock_id=?", (flag, sid))
+            newly += flag
+    conn.commit()
+    total = conn.execute("SELECT COUNT(*) FROM stock_info WHERE delisted=1").fetchone()[0]
+    log.info("下市標記：新增 %d 檔，目前共 %d 檔下市", newly, total)
+    return newly
+
+
 # ---- 股票池篩選 ----
 def current_disposition_ids(conn, as_of: str | None = None) -> set[str]:
     """處置期間涵蓋 as_of（預設今天）的股票代號集合。"""
@@ -270,7 +302,10 @@ def select_universe(conn, cfg) -> list[str]:
     結構性排除（市場別、代號長度、ETF）+ 處置股排除（官方名單，旗標生效）。
     """
     u = cfg["universe"]
-    df = db.read_sql(conn, "SELECT stock_id, stock_name, type, industry_category FROM stock_info")
+    df = db.read_sql(conn, """
+        SELECT stock_id, stock_name, type, industry_category
+        FROM stock_info WHERE COALESCE(delisted, 0) = 0
+    """)
     if df.empty:
         return []
 

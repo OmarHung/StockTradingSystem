@@ -23,6 +23,7 @@ SCHEMA: dict[str, str] = {
             industry_category TEXT,
             type              TEXT,          -- twse / tpex
             date              TEXT,          -- 資料日期
+            delisted          INTEGER DEFAULT 0,  -- 已下市（不在券商可交易合約中）
             PRIMARY KEY (stock_id)
         )
     """,
@@ -317,6 +318,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(brain_log)").fetchall()]
     if cols and "run_id" not in cols:
         conn.execute("ALTER TABLE brain_log ADD COLUMN run_id TEXT")
+    # 下市標記：stock_info（FinMind 清單含歷史下市代號，需旗標過濾）
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(stock_info)").fetchall()]
+    if cols and "delisted" not in cols:
+        conn.execute("ALTER TABLE stock_info ADD COLUMN delisted INTEGER DEFAULT 0")
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:

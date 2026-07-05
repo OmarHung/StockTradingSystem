@@ -100,6 +100,30 @@ def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
     return n
 
 
+def list_tradable_ids() -> set[str]:
+    """現行可交易股票代號全集（TSE/OTC/OES 合約）。
+
+    券商合約僅含未下市證券，作為下市判定的權威名單；
+    回傳空集合視為抓取失敗，呼叫端不得據以標記下市。
+    登入後合約檔為非同步下載，須等 Fetched 再迭代，否則清單不完整會誤標。
+    """
+    import time
+    api = _login()
+    for _ in range(60):
+        status = str(getattr(api.Contracts, "status", "")).split(".")[-1]
+        if status == "Fetched":
+            break
+        time.sleep(0.5)
+    else:
+        log.warning("shioaji 合約檔下載逾時（status=%s）", status)
+        return set()
+    ids: set[str] = set()
+    for exchange in api.Contracts.Stocks:
+        for contract in exchange:
+            ids.add(str(contract.code))
+    return ids
+
+
 def fetch_disposition(conn) -> int:
     """處置股第二源：api.punish()（欄向量）。與 TWSE 官方名單雙源並用（upsert 去重）。"""
     api = _login()

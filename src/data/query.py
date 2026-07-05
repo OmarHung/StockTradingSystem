@@ -342,11 +342,13 @@ def all_stock_ids() -> list[str]:
 
 def list_stocks() -> pd.DataFrame:
     with db.connect(_db_path()) as conn:
-        return db.read_sql(conn, "SELECT * FROM stock_info ORDER BY stock_id")
+        return db.read_sql(
+            conn,
+            "SELECT * FROM stock_info WHERE COALESCE(delisted, 0) = 0 ORDER BY stock_id")
 
 
 def stocks_overview() -> list[dict]:
-    """全市場股票總覽（含尚未下載/處置股），供 WebUI 股票瀏覽器。
+    """全市場股票總覽（含尚未下載/處置股，排除下市），供 WebUI 股票瀏覽器。
 
     每檔附：市場、產業、資料下載狀態（價格天數/最後日期）、是否處置中。
     """
@@ -360,6 +362,7 @@ def stocks_overview() -> list[dict]:
             LEFT JOIN (SELECT stock_id, COUNT(*) AS n, MAX(date) AS last_date
                        FROM price_daily GROUP BY stock_id) p
               ON p.stock_id = s.stock_id
+            WHERE COALESCE(s.delisted, 0) = 0
             ORDER BY s.stock_id
         """)
         disp = {r[0] for r in conn.execute(

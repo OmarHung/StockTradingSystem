@@ -129,6 +129,7 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                 shioaji_source.fetch_disposition(conn)
             except Exception as e:  # noqa: BLE001
                 log.warning("shioaji 處置股抓取失敗（不影響回補）：%s", e)
+        fetchers.mark_delisted(conn)      # 下市標記（券商合約為準，過濾殭屍代號）
         targets = stocks if stocks else fetchers.select_universe(conn, cfg)
         if limit:
             targets = targets[:limit]
