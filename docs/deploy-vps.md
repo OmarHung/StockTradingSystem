@@ -3,7 +3,7 @@
 架構：uvicorn 只綁 `127.0.0.1`，**不開任何公網 port**，一律透過 SSH tunnel 存取 WebUI。
 排程（盤中監控／資料更新／每日主流程）跑在 uvicorn 進程內，由 systemd 常駐。
 
-適用：Ubuntu 22.04 / 24.04。以下以使用者 `trader`、安裝路徑 `/home/trader/StockTradingSystem` 為例。
+適用：Ubuntu 22.04 / 24.04。以下以使用者 `<USER>`、安裝路徑 `/home/<USER>/StockTradingSystem` 為例。
 
 ---
 
@@ -53,8 +53,8 @@ cd frontend && npm ci && npm run build && cd ..
 在**本機**執行：
 
 ```bash
-scp .env trader@<VPS_IP>:~/StockTradingSystem/.env
-rsync -av data/market.db data/chroma trader@<VPS_IP>:~/StockTradingSystem/data/
+scp .env <USER>@<VPS_IP>:~/StockTradingSystem/.env
+rsync -av data/market.db data/chroma <USER>@<VPS_IP>:~/StockTradingSystem/data/
 ```
 
 `.env` 需要的鍵（缺哪個對應功能就停用）：
@@ -80,10 +80,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=trader
-WorkingDirectory=/home/trader/StockTradingSystem
+User=<USER>
+WorkingDirectory=/home/<USER>/StockTradingSystem
 Environment=TZ=Asia/Taipei
-ExecStart=/home/trader/StockTradingSystem/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/<USER>/StockTradingSystem/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 
@@ -92,6 +92,9 @@ WantedBy=multi-user.target
 ```
 
 ```bash
+# 讓部署使用者不用 sudo 就能看 service log（重新登入生效）
+sudo usermod -aG systemd-journal <USER>
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now trading
 systemctl status trading            # 應為 active (running)
@@ -103,12 +106,19 @@ journalctl -u trading -f            # 看即時 log
 
 ## 5. 本機存取（SSH tunnel）
 
-本機 `~/.ssh/config` 加入：
+一次性連線直接下指令即可（`-o` 兩項為 keepalive，防 NAT 靜默斷線）：
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 \
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=3 <USER>@<VPS_IP>
+```
+
+常用的話建議存成別名——本機 `~/.ssh/config` 加入：
 
 ```
 Host trading
     HostName <VPS_IP>
-    User trader
+    User <USER>
     LocalForward 8000 127.0.0.1:8000
     ServerAliveInterval 30
     ServerAliveCountMax 3
@@ -150,5 +160,5 @@ sudo systemctl restart trading
 
 - **WebUI 開不起來**：`journalctl -u trading -n 100`；確認 `frontend/dist` 存在（沒 build 就只有 `/api/*` 能用）。
 - **排程沒跑**：`date` 確認時區；WebUI 設定 → 排程 檢查啟用狀態；`/api/scheduler/status`。
-- **chromadb / tenant 錯誤**：多半是 `data/chroma` 沒搬完整或權限不對；確認目錄擁有者為 `trader`。
+- **chromadb / tenant 錯誤**：多半是 `data/chroma` 沒搬完整或權限不對；確認目錄擁有者為 `<USER>`。
 - **LLM 呼叫失敗**：`.env` 的 `ANTHROPIC_API_KEY` 是否存在且非空字串（空字串會讓 SDK 壞掉，程式已有防護但金鑰仍需有效）。
