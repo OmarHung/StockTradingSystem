@@ -77,6 +77,9 @@ def fundamental_features(stock_id: str, as_of: str) -> dict:
             "latest_revenue_month": mo,
             "latest_revenue": int(latest["revenue"]) if latest["revenue"] else None,
             "revenue_yoy": yoy,
+            # 同值的百分比表達（874.477 → "87447.7%"）：建設股等認列不均產業
+            # 會出現極端年增率，雙格式並列防 LLM 把小數誤讀成百分比（1808 案例）
+            "revenue_yoy_pct": f"{yoy * 100:+.1f}%" if yoy is not None else None,
         })
     val = q.get_valuation(stock_id)
     val = val[val["date"] <= as_of] if not val.empty else val

@@ -71,7 +71,11 @@ def run_fundamental(stock_id: str, as_of: str) -> tuple[FundamentalReport | None
         return None, feats
     system = (
         "你是專業台股基本面分析師。根據提供的月營收與估值數據做解讀，只能引用提供的數字。"
-        "輸出繁體中文。若引用月營收年增率，請在 cited_revenue_yoy 填入實算值（小數）；"
+        "輸出繁體中文。"
+        "單位注意：revenue_yoy 是『小數』（1.0 = +100%），revenue_yoy_pct 是同一數字的"
+        "百分比表達，兩者互為對照——建設股等認列不均的產業可能出現數百倍的極端年增率，"
+        "此時 revenue_yoy 會是幾百的小數，這是真實數據不是百分比，勿自行除以100。"
+        "cited_revenue_yoy 請『原封不動照抄 revenue_yoy 的值』，禁止任何換算；"
         "若引用本益比，請在 cited_per 填入實算值。"
         "估值欄位：per=本益比（虧損公司為 null）、pbr=股價淨值比、"
         "dividend_yield_pct=殖利率(%)、per_percentile_1y=本益比近一年百分位"

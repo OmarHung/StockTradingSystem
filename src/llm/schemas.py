@@ -50,7 +50,9 @@ class FundamentalReport(BaseModel):
     score: float = Field(description=_SCORE_DESC)
     confidence: float = Field(description=_CONF_DESC)
     cited_revenue_yoy: float | None = Field(
-        default=None, description="你引用的『最新月營收年增率』(小數，如 0.15=15%)"
+        default=None,
+        description="照抄輸入數據 revenue_yoy 的原值（小數，1.0=+100%），禁止換算。"
+                    "極端產業可能出現數百的值，照抄即可。"
     )
     cited_per: float | None = Field(
         default=None, description="你引用的『本益比』實算值（如 18.5；未引用留空）"
