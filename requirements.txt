@@ -6,6 +6,7 @@
 # --- Phase 0：資料層 ---
 requests>=2.31
 pandas>=2.2
+numpy>=1.26           # pandas 相依，但程式碼有直接 import，明列避免隱性依賴
 pyyaml>=6.0
 python-dotenv>=1.0
 tenacity>=8.2          # API 重試
@@ -14,6 +15,8 @@ ruamel.yaml>=0.18      # 保留註解的 YAML 讀寫（WebUI 存檔用）
 
 # --- Phase 1：回測 + WebUI ---
 plotly>=5.20           # 圖表
+fastapi>=0.115         # WebUI 後端 API
+uvicorn>=0.30          # ASGI server（啟動 api.main:app）
 
 # --- Phase 2：LLM Agent ---
 anthropic>=0.116        # Claude API（分析師/交易員/反思）
