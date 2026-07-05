@@ -610,8 +610,35 @@ def data_status() -> dict:
                 "lag_days": lag_days, "status": status, "hint": hint,
             })
 
+    # 逐日標記缺日統計（以「日」為單位的中段缺口——檔數覆蓋率看不見這種洞）。
+    # 檢查窗口＝近兩年（與 UI 回補預設一致），排除最新交易日（當日盤後才公布）。
+    _MARKERS = [
+        ("sj_daily", "股價(shioaji)"),
+        ("twse_chips_daily", "上市籌碼"),
+        ("tpex_chips_daily", "上櫃籌碼"),
+        ("twse_val_daily", "上市估值"),
+        ("tpex_val_daily", "上櫃估值"),
+    ]
+    day_gaps = []
+    with db.connect(_db_path()) as conn:
+        two_years_ago = (dt.date.today() - dt.timedelta(days=730)).isoformat()
+        cal_days = [r[0] for r in conn.execute(
+            "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<? ORDER BY date",
+            (two_years_ago, latest_trading or dt.date.today().isoformat()))]
+        for ds, label in _MARKERS:
+            done = {r[0] for r in conn.execute(
+                "SELECT stock_id FROM fetch_log WHERE dataset=?", (ds,))}
+            if not done:
+                continue   # 該資料源從未跑過（如 FinMind-only 時代），不報
+            miss = [d for d in cal_days if d not in done]
+            if miss:
+                day_gaps.append({"key": ds, "label": label, "missing": len(miss),
+                                 "first": miss[0], "last": miss[-1]})
+
     # 整體結論
     problems = []
+    for g in day_gaps:
+        problems.append(f"「{g['label']}」缺 {g['missing']} 個歷史交易日（{g['first']}~{g['last']}）")
     for d in datasets:
         if d["status"] == "missing":
             problems.append(f"「{d['label']}」尚未回補")
@@ -625,7 +652,7 @@ def data_status() -> dict:
         summary = {"level": "ok", "text": "資料完整且新鮮，無需回補。"}
 
     return {"latest_trading_day": latest_trading, "universe": universe,
-            "datasets": datasets, "summary": summary}
+            "datasets": datasets, "summary": summary, "day_gaps": day_gaps}
 
 
 # ---------- 選股結果快照（重整/重啟後還原）----------

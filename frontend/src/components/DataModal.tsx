@@ -127,6 +127,26 @@ export function DataModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          {/* 歷史缺日（逐日標記統計：以「日」為單位的中段缺口，檔數覆蓋率看不到） */}
+          {(status as any)?.day_gaps?.length > 0 && (
+            <div style={{
+              padding: "8px 12px", borderRadius: 6, marginBottom: 12, fontSize: 12,
+              background: "rgba(240,185,11,0.08)", border: "1px solid #5a4a1a",
+            }}>
+              <div style={{ fontWeight: 600, color: "var(--warning)", marginBottom: 4 }}>
+                ⛳ 歷史缺日（近兩年，回補會自動續補這些日子）
+              </div>
+              {((status as any).day_gaps as any[]).map((g) => (
+                <div key={g.key} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
+                  <span style={{ color: "var(--text-dim)" }}>{g.label}</span>
+                  <span className="mono">
+                    缺 <b style={{ color: "var(--warning)" }}>{g.missing}</b> 個交易日　{g.first} ~ {g.last}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* 各資料集健康狀態 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {status?.datasets.map((d) => {
