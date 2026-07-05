@@ -16,6 +16,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   const [recs, setRecs] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<Record<string, boolean>>({});   // 卡片展開狀態（預設收闔）
 
   // 股名對照表（一次載入；歷史報告也吃得到）
   useEffect(() => {
@@ -63,13 +64,22 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
         {[...recs].sort((a, b) => b.plan.action_score - a.plan.action_score).map((rec) => {
           const p = rec.plan;
           const a = ACTION[p.action] ?? { cls: "hold", label: p.action };
+          const expanded = !!open[rec.stock_id];
           return (
             <div key={rec.stock_id} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* 標題列（點擊展開/收闔；點代號切主圖） */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                onClick={() => setOpen((o) => ({ ...o, [rec.stock_id]: !expanded }))}>
+                <span style={{ color: "var(--text-dim)", fontSize: 10, width: 12 }}>{expanded ? "▼" : "▶"}</span>
                 <span className={`tag ${a.cls}`}>{a.label}</span>
-                <b style={{ cursor: "pointer" }} onClick={() => onSelect(rec.stock_id)}>
+                <b onClick={(e) => { e.stopPropagation(); onSelect(rec.stock_id); }}>
                   {rec.stock_id}{names[rec.stock_id] ? ` ${names[rec.stock_id]}` : ""}
                 </b>
+                {rec.guard && (
+                  <span style={{ fontSize: 11 }}>
+                    {rec.guard.approved ? "🛡️✅" : "🛡️✗"}
+                  </span>
+                )}
                 <span className="mono" style={{ color: "var(--text-dim)" }}>
                   動作分 {p.action_score > 0 ? "+" : ""}{fmt(p.action_score)} · 信心 {fmt(p.confidence * 100, 0)}%
                 </span>
@@ -78,7 +88,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                   進 {fmt(p.entry_low)}~{fmt(p.entry_high)} · 損 {fmt(p.stop_loss)} · 標 {fmt(p.target_price)} · R:R {fmt(p.reward_risk)}
                 </span>
               </div>
-              {rec.guard && (
+              {expanded && rec.guard && (
                 <div style={{
                   marginTop: 6, padding: "5px 8px", borderRadius: 4, fontSize: 11,
                   background: rec.guard.approved ? "rgba(14,203,129,0.08)" : "rgba(240,185,11,0.08)",
@@ -94,8 +104,8 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                   )}
                 </div>
               )}
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>{p.rationale}</div>
-              <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {expanded && <div style={{ marginTop: 6, fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>{p.rationale}</div>}
+              {expanded && <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {Object.entries(rec.analysts ?? {}).map(([k, e]: [string, any]) => (
                   <span key={k} style={{ fontSize: 11, color: "var(--text-dim)" }}>
                     {({ technical: "技術", chips: "籌碼", fundamental: "基本" } as any)[k] ?? k}:{" "}
@@ -105,7 +115,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                     {e.validation_flags?.length ? " ⚠️" : ""}
                   </span>
                 ))}
-              </div>
+              </div>}
             </div>
           );
         })}
