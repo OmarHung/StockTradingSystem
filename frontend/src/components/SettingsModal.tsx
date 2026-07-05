@@ -184,13 +184,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
-              <NumRow label="Credit 儲值總額 (USD)" step={10}
-                value={cfg.llm?.credit_total_usd ?? 0} onChange={(v) => setField("llm", "credit_total_usd", v)} />
-              <div className="form-hint">
-                Anthropic 官方 API 沒有查餘額的端點，系統改用本地估算：每次 LLM 呼叫記錄 token 用量並依模型價目換算。
-                填入你在 Console 的儲值總額（0 = 不估算剩餘），頂部狀態列即顯示估計剩餘 credit。改動請按「儲存此頁」。
-              </div>
-              <LlmUsageRow />
+              <CreditUsageRow flash={flash} />
             </div>
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
@@ -267,22 +261,49 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** LLM 用量明細（今日/本月/累計花費，本地估算）。 */
-function LlmUsageRow() {
+/** Credit 儲值額（屬個人資訊，存 .env）+ LLM 用量明細（本地估算）。 */
+function CreditUsageRow({ flash }: { flash: (m: string) => void }) {
   const [u, setU] = useState<import("../api").LlmUsage | null>(null);
-  useEffect(() => { api.llmUsage().then(setU).catch(() => {}); }, []);
-  if (!u) return null;
+  const [val, setVal] = useState("");
+  const load = () => api.llmUsage().then((r) => {
+    setU(r);
+    setVal(r.credit_total_usd != null ? String(r.credit_total_usd) : "");
+  }).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    try {
+      await api.setEnv("CLAUDE_CREDIT_TOTAL_USD", val.trim() || "0");
+      flash("儲值額已寫入 .env ✓");
+      load();
+    } catch (e) { alert(String(e)); }
+  };
+
   return (
-    <div style={{ display: "flex", gap: 18, fontSize: 12, color: "var(--text-dim)",
-      background: "#0d1119", borderRadius: 6, padding: "8px 12px", marginTop: 8 }}>
-      <span>今日 <b style={{ color: "var(--text)" }}>${u.today_usd.toFixed(2)}</b></span>
-      <span>本月 <b style={{ color: "var(--text)" }}>${u.month_usd.toFixed(2)}</b></span>
-      <span>累計 <b style={{ color: "var(--text)" }}>${u.total_usd.toFixed(2)}</b></span>
-      <span>呼叫 {u.calls} 次</span>
-      {u.remaining_usd != null && (
-        <span>估計剩餘 <b style={{ color: "var(--text)" }}>${u.remaining_usd.toFixed(2)}</b></span>
+    <>
+      <div className="form-row">
+        <label>Credit 儲值總額 (USD)</label>
+        <input type="number" min={0} step={10} value={val} placeholder="0 = 不估算剩餘"
+          onChange={(e) => setVal(e.target.value)} />
+        <button className="btn" onClick={save}>存</button>
+      </div>
+      <div className="form-hint">
+        Anthropic 官方 API 沒有查餘額的端點，系統改用本地估算：每次 LLM 呼叫記錄 token 用量並依模型價目換算。
+        填入你在 Console 的儲值總額，頂部狀態列即顯示估計剩餘 credit。屬個人資訊，存 .env（不進 git）。
+      </div>
+      {u && (
+        <div style={{ display: "flex", gap: 18, fontSize: 12, color: "var(--text-dim)",
+          background: "#0d1119", borderRadius: 6, padding: "8px 12px", marginTop: 8 }}>
+          <span>今日 <b style={{ color: "var(--text)" }}>${u.today_usd.toFixed(2)}</b></span>
+          <span>本月 <b style={{ color: "var(--text)" }}>${u.month_usd.toFixed(2)}</b></span>
+          <span>累計 <b style={{ color: "var(--text)" }}>${u.total_usd.toFixed(2)}</b></span>
+          <span>呼叫 {u.calls} 次</span>
+          {u.remaining_usd != null && (
+            <span>估計剩餘 <b style={{ color: "var(--text)" }}>${u.remaining_usd.toFixed(2)}</b></span>
+          )}
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

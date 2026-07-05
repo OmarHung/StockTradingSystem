@@ -531,12 +531,11 @@ def llm_usage():
     模型價目換算 USD；若設定 llm.credit_total_usd（儲值總額），回傳估計剩餘。
     """
     summary = q.llm_usage_summary()
-    credit_total = None
+    # 儲值額屬個人資訊，存 .env（CLAUDE_CREDIT_TOTAL_USD），不進 git 的 settings.yaml
     try:
-        credit_total = (config_io.load_raw().get("llm") or {}).get("credit_total_usd")
-    except Exception:  # noqa: BLE001 — 設定檔問題不應讓端點壞掉
-        pass
-    credit_total = float(credit_total) if credit_total else None
+        credit_total = float(os.getenv("CLAUDE_CREDIT_TOTAL_USD") or 0) or None
+    except ValueError:
+        credit_total = None
     summary["credit_total_usd"] = credit_total
     summary["remaining_usd"] = (credit_total - summary["total_usd"]) if credit_total else None
     return summary
@@ -770,7 +769,7 @@ class EnvUpdate(BaseModel):
 
 
 _ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY", "SJ_API_KEY", "SJ_SEC_KEY",
-                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "CLAUDE_CREDIT_TOTAL_USD"}
 
 
 @app.post("/api/set-env")
