@@ -111,3 +111,13 @@ def test_intraday_exit(broker):
     assert broker.fills().iloc[0]["reason"] == "stop_intraday"
     # 再出場同一檔 → None（收盤 check_stops 不會重複出場）
     assert broker.intraday_exit("2026-07-05", "2330", 95.0, "stop") is None
+
+
+def test_place_buy_rejected_when_trading_disabled(broker):
+    """緊急停止後 place_buy 拒單（kill-switch 掛單當下即時檢查）。"""
+    broker.set_trading_enabled(False)
+    oid = broker.place_buy("2026-07-06", "2330", 1000, 100.0, 95.0, 110.0)
+    assert oid is None
+    broker.set_trading_enabled(True)
+    oid = broker.place_buy("2026-07-06", "2330", 1000, 100.0, 95.0, 110.0)
+    assert isinstance(oid, int)

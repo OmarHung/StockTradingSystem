@@ -108,7 +108,11 @@ class PaperBroker:
 
     # ---------- 下單 ----------
     def place_buy(self, as_of: str, stock_id: str, shares: int, limit_price: float,
-                  stop_loss: float | None, target: float | None, industry: str = "") -> int:
+                  stop_loss: float | None, target: float | None, industry: str = "") -> int | None:
+        """掛隔日限價買單。緊急停止時拒單回 None——kill-switch 在「掛單當下」
+        再查一次，避免每日流程開跑後才按停止、進行中的決策照樣下單的競態。"""
+        if not self.trading_enabled():
+            return None
         with db.connect(self.db_path) as conn:
             cur = conn.execute(
                 "INSERT INTO orders (created_as_of, stock_id, side, limit_price, shares, "

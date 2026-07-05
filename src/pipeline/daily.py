@@ -93,6 +93,9 @@ def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
                 stop_loss=plan.get("stop_loss"), target=plan.get("target_price"),
                 industry=(guard.get("industry") or ""),
             )
+            if oid is None:
+                log.warning("⛔ 交易已緊急停止（流程中途按下），%s 掛單被拒", sid)
+                continue
             orders.append({"order_id": oid, "stock_id": sid, "shares": guard["shares"],
                            "limit": plan["entry_high"], "stop": plan.get("stop_loss"),
                            "target": plan.get("target_price")})

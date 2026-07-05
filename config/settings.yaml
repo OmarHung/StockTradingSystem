@@ -31,13 +31,11 @@ screener:
     - 60
   chips_lookback: 20               # 籌碼（法人淨買）回看天數
   weights:                         # 因子權重（會正規化；正值代表越高越好）
-    momentum_20: 1.0
+    momentum_20: 1
     momentum_60: 0.8
-    chips_net_buy: 1.2             # 法人淨買（外資+投信）
-    revenue_yoy: 1.0               # 月營收年增率
-    above_ma60: 0.5               # 站上季線
-
-# ---- 資金 / 風險（Phase 3 生效，先放預設值供 WebUI 顯示）----
+    chips_net_buy: 1.2
+    revenue_yoy: 1
+    above_ma60: 0.5
 capital:
   total: 1000000                   # 總資金（TWD）
 risk:
@@ -64,7 +62,7 @@ logging:
 
 # ---- 每日交易主流程 ----
 daily:
-  top_n: 3                         # 盤後送進 LLM 深度分析的檔數（決策成本 ≈ top_n × 5 次呼叫）
+  top_n: 5                         # 盤後送進 LLM 深度分析的檔數（決策成本 ≈ top_n × 5 次呼叫）
 
 # ---- 後端內建排程（取代 launchd；WebUI 設定頁可調）----
 scheduler:

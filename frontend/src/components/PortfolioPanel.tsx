@@ -83,10 +83,11 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
               ? { borderColor: "var(--up)", color: "var(--up)", fontWeight: 700 }
               : { background: "var(--up)", color: "#fff", fontWeight: 700 }}
             onClick={async () => {
+              if (enabled == null) return;   // 狀態未載入，不動作
               if (enabled && !window.confirm("確定要緊急停止交易？\n停止後每日流程只做保護性出場，不會開新倉。")) return;
               await api.tradingToggle(!enabled); load();
             }}>
-            {enabled ? "🛑 緊急停止" : "⛔ 已停止（點擊恢復）"}
+            {enabled === undefined || enabled === null ? "…" : enabled ? "🛑 緊急停止" : "⛔ 已停止（點擊恢復）"}
           </button>
         </div>
       }>
