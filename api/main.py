@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 from pathlib import Path
 
@@ -212,6 +213,48 @@ def screener(as_of: str, top_n: int | None = None):
     return rows
 
 
+# 背景選股（供 WebUI 實時進度）：start 啟動執行緒，status 輪詢階段/逐檔進度
+_scr_lock = threading.Lock()
+_scr_state: dict = {"running": False, "as_of": None, "stage": "", "current": 0,
+                    "total": 0, "error": None}
+
+
+class ScreenerStartReq(BaseModel):
+    as_of: str
+    top_n: int = 30
+
+
+@app.post("/api/screener/start")
+def screener_start(req: ScreenerStartReq):
+    with _scr_lock:
+        if _scr_state["running"]:
+            return {"started": False, "running": True}
+        _scr_state.update(running=True, as_of=req.as_of, stage="準備中",
+                          current=0, total=0, error=None)
+
+    def _work():
+        try:
+            def prog(stage: str, cur: int = 0, tot: int = 0) -> None:
+                _scr_state.update(stage=stage, current=cur, total=tot)
+            ranked = run_screener(req.as_of, progress=prog)
+            rows = _records(ranked.head(req.top_n)) if not ranked.empty else []
+            q.save_screener_result(req.as_of, rows, req.top_n)
+            _scr_state.update(stage="完成", current=0, total=0)
+        except Exception as e:  # noqa: BLE001 — 錯誤放進 status 讓前端顯示
+            log.error("背景選股失敗：%s", e)
+            _scr_state["error"] = str(e)
+        finally:
+            _scr_state["running"] = False
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"started": True, "running": True}
+
+
+@app.get("/api/screener/status")
+def screener_status():
+    return dict(_scr_state)
+
+
 @app.get("/api/screener/saved")
 def screener_saved(as_of: str):
     """讀取某基準日已保存的選股結果（無則 null）。"""
@@ -412,7 +455,7 @@ def clear_ai_data():
     """清除所有 AI 產出：分析記錄、交易計畫、Guard 駁回、反思記憶。
 
     不動行情資料（股價/法人/營收等）、模擬交易帳本（positions/orders/fills），
-    也不動智慧選股快照（screener_result 是純量化排名，非 LLM 產出，可隨時重算）。
+    也不動量化選股快照（screener_result 是純量化排名，非 LLM 產出，可隨時重算）。
     """
     tables = ("brain_log", "trade_plan", "friction_log")
     deleted: dict = {}

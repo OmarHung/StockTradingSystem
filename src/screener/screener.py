@@ -23,10 +23,16 @@ def _zscore(s: pd.Series) -> pd.Series:
     return z.fillna(0.0)
 
 
-def run_screener(as_of: str, universe: list[str] | None = None, cfg=None) -> pd.DataFrame:
-    """對 as_of 日執行選股，回傳排名後的 DataFrame（含綜合分與因子分拆解）。"""
+def run_screener(as_of: str, universe: list[str] | None = None, cfg=None,
+                 progress=None) -> pd.DataFrame:
+    """對 as_of 日執行選股，回傳排名後的 DataFrame（含綜合分與因子分拆解）。
+
+    progress(stage, current, total)：進度回呼（供 WebUI 實時顯示），可為 None。
+    """
     cfg = cfg or get_settings()
     sc = cfg["screener"]
+    if progress:
+        progress("載入股票池", 0, 0)
     universe = universe or q.all_stock_ids()
 
     raw = F.compute_factors(
@@ -35,11 +41,14 @@ def run_screener(as_of: str, universe: list[str] | None = None, cfg=None) -> pd.
         momentum_lookback=sc["momentum_lookback"],
         chips_lookback=sc["chips_lookback"],
         min_avg_turnover=sc["min_avg_turnover"],
+        progress=progress,
     )
     if raw.empty:
         log.warning("as_of=%s 無任何股票通過因子/流動性條件", as_of)
         return raw
 
+    if progress:
+        progress(f"正規化與排名（{len(raw)} 檔通過流動性條件）", 0, 0)
     weights: dict[str, float] = sc["weights"]
     total_w = sum(abs(w) for w in weights.values()) or 1.0
 

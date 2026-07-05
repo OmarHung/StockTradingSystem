@@ -18,14 +18,25 @@ def compute_factors(
     momentum_lookback: list[int],
     chips_lookback: int,
     min_avg_turnover: float,
+    progress=None,
 ) -> pd.DataFrame:
-    """回傳橫斷面因子表。含流動性過濾（不足者剔除）。"""
+    """回傳橫斷面因子表。含流動性過濾（不足者剔除）。
+
+    progress(stage, current, total)：進度回呼（供 WebUI 實時顯示），可為 None。
+    """
+    def _p(stage: str, cur: int = 0, tot: int = 0) -> None:
+        if progress:
+            progress(stage, cur, tot)
+
     # 抓足夠長的價格窗（最長回看 + 緩衝）供動能/均線計算
     max_look = max(momentum_lookback + [60])
     price_start = _shift_days(as_of, max_look * 2 + 20)
     # 用除權息還原價算動能/均線，避免配息跳空被誤判為下跌
+    _p(f"讀取 {len(stock_ids)} 檔價格資料（含還原價計算）")
     prices = q.get_prices_bulk(stock_ids, price_start, as_of, adjusted=True)
+    _p("讀取法人買賣超")
     inst = q.get_institutional_bulk(stock_ids, _shift_days(as_of, chips_lookback * 2 + 10), as_of)
+    _p("讀取月營收")
     revenue = q.get_revenue_bulk(stock_ids, as_of)
 
     if prices.empty:
@@ -36,7 +47,10 @@ def compute_factors(
     rev_g = {sid: g for sid, g in revenue.groupby("stock_id")} if not revenue.empty else {}
 
     rows = []
-    for sid in stock_ids:
+    total = len(stock_ids)
+    for i, sid in enumerate(stock_ids):
+        if i % 100 == 0 or i == total - 1:
+            _p("計算因子", i + 1, total)
         p = price_g.get(sid)
         if p is None or len(p) < 60:
             continue  # 上市未滿季線者略過

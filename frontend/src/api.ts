@@ -96,6 +96,10 @@ export const api = {
     get<Record<string, any>[]>(`/disposition${activeOn ? `?active_on=${activeOn}` : ""}`),
   screener: (asOf: string, topN = 30) =>
     get<ScreenerRow[]>(`/screener?as_of=${asOf}&top_n=${topN}`),
+  screenerStart: (asOf: string, topN = 30) =>
+    post<{ started: boolean; running: boolean }>("/screener/start", { as_of: asOf, top_n: topN }),
+  screenerStatus: () =>
+    get<{ running: boolean; as_of: string | null; stage: string; current: number; total: number; error: string | null }>("/screener/status"),
   screenerSaved: (asOf: string) =>
     get<SavedScreener | null>(`/screener/saved?as_of=${asOf}`),
   screenerHistory: () =>

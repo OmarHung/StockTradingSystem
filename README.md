@@ -27,7 +27,7 @@
 
 ## 功能特色
 
-- **React 交易終端**：K 線圖、自選/排行、智慧選股、AI 選股報告、策略回測、持倉績效、LLM 活動監控，面板可自由佈局（介面設計參考 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)）
+- **React 交易終端**：K 線圖、自選/排行、量化選股、AI 選股報告、策略回測、持倉績效、LLM 活動監控，面板可自由佈局（介面設計參考 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)）
 - **三源資料層**：shioaji 為主、TWSE/TPEx 官方資料、FinMind 備援，含還原價與資料品質檢查
 - **可驗證的 AI 決策**：分析師引用的每個數字都與實際資料比對，攔截幻覺
 - **風控優先**：九道確定性風控閘門置於 LLM 之後，任何交易計畫都必須通過

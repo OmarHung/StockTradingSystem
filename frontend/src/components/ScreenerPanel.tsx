@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api, type ScreenerRow } from "../api";
 import { Panel, fmt, cls, StarButton } from "./Panel";
 
-/** 智慧選股面板：跑量化多因子初篩，點列可切換主圖，星星可加入自選。 */
+/** 量化選股面板：跑量化多因子初篩，點列可切換主圖，星星可加入自選。 */
 export function ScreenerPanel({
   onSelect, isWatched, onToggleWatch,
 }: {
@@ -15,6 +15,7 @@ export function ScreenerPanel({
   const [rows, setRows] = useState<ScreenerRow[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [prog, setProg] = useState<{ stage: string; current: number; total: number } | null>(null);
 
   // 預設帶入最新交易日
   useEffect(() => {
@@ -37,17 +38,30 @@ export function ScreenerPanel({
     return () => { alive = false; };
   }, [asOf]);
 
+  // 背景執行 + 輪詢進度：階段文字與逐檔計數實時更新，完成後載回落庫結果
   const run = async () => {
     setLoading(true);
+    setProg({ stage: "啟動中…", current: 0, total: 0 });
     try {
-      setRows(await api.screener(asOf, 30));
-      setSavedAt(new Date().toISOString());  // 後端已落庫，這裡即時反映
+      await api.screenerStart(asOf, 30);   // 已在跑則直接接上輪詢
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 500));
+        const st = await api.screenerStatus();
+        setProg({ stage: st.stage, current: st.current, total: st.total });
+        if (!st.running) {
+          if (st.error) throw new Error(st.error);
+          const saved = await api.screenerSaved(asOf);
+          setRows(saved?.rows ?? []);
+          setSavedAt(saved?.created_at ?? new Date().toISOString());
+          break;
+        }
+      }
     } catch (e) { alert(String(e)); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setProg(null); }
   };
 
   return (
-    <Panel title="智慧選股" icon={<Search size={13} />}
+    <Panel title="量化選股" icon={<Search size={13} />}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {savedAt && (
@@ -59,7 +73,23 @@ export function ScreenerPanel({
           <button className="btn primary" onClick={run} disabled={loading || !asOf}>執行</button>
         </div>
       }>
-      {loading ? <div className="spinner">量化初篩中…</div> : (
+      {loading ? (
+        <div style={{ padding: "24px 20px", textAlign: "center" }}>
+          <div className="spinner" style={{ marginBottom: 10 }}>
+            {prog?.stage || "量化初篩中"}
+            {prog && prog.total > 0 ? `　${prog.current.toLocaleString()} / ${prog.total.toLocaleString()} 檔` : "…"}
+          </div>
+          {prog && prog.total > 0 && (
+            <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden", maxWidth: 360, margin: "0 auto" }}>
+              <div style={{
+                height: "100%", background: "#2962ff", borderRadius: 2,
+                width: `${Math.min(100, (prog.current / prog.total) * 100)}%`,
+                transition: "width .4s",
+              }} />
+            </div>
+          )}
+        </div>
+      ) : (
         <table className="grid">
           <thead>
             <tr><th></th><th>#</th><th>代碼</th><th>股名</th><th>綜合分</th><th>動能20</th><th>法人淨買</th><th>營收YoY</th></tr>
