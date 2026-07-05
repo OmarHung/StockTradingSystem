@@ -523,6 +523,25 @@ def brain_log(limit: int = 100):
     return _records(q.brain_log(limit=limit))
 
 
+@app.get("/api/llm-usage")
+def llm_usage():
+    """Claude API 用量成本彙總 + 剩餘 credit 估計。
+
+    官方 API 沒有查餘額的端點，故採本地估算：每次呼叫記錄 token 用量並依
+    模型價目換算 USD；若設定 llm.credit_total_usd（儲值總額），回傳估計剩餘。
+    """
+    summary = q.llm_usage_summary()
+    credit_total = None
+    try:
+        credit_total = (config_io.load_raw().get("llm") or {}).get("credit_total_usd")
+    except Exception:  # noqa: BLE001 — 設定檔問題不應讓端點壞掉
+        pass
+    credit_total = float(credit_total) if credit_total else None
+    summary["credit_total_usd"] = credit_total
+    summary["remaining_usd"] = (credit_total - summary["total_usd"]) if credit_total else None
+    return summary
+
+
 @app.get("/api/friction")
 def friction(limit: int = 100):
     """Guard pipeline 駁回紀錄（供檢討風控鬆緊）。"""

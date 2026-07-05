@@ -538,6 +538,26 @@ def stock_series(stock_id: str) -> dict:
     return out
 
 
+def llm_usage_summary() -> dict:
+    """彙總 brain_log 的 LLM 用量成本（供 WebUI 顯示 Claude credit 花費/剩餘）。"""
+    sql = """
+        SELECT
+            COALESCE(SUM(cost_usd), 0)                                            AS total_usd,
+            COALESCE(SUM(CASE WHEN ts >= date('now','localtime') THEN cost_usd END), 0)                  AS today_usd,
+            COALESCE(SUM(CASE WHEN ts >= date('now','localtime','start of month') THEN cost_usd END), 0) AS month_usd,
+            COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0)
+                + COALESCE(SUM(cache_write_tokens), 0)                            AS total_input_tokens,
+            COALESCE(SUM(output_tokens), 0)                                       AS total_output_tokens,
+            COUNT(cost_usd)                                                       AS calls
+        FROM brain_log
+        WHERE model IS NOT NULL
+    """
+    with db.connect(_db_path()) as conn:
+        row = conn.execute(sql).fetchone()
+    keys = ("total_usd", "today_usd", "month_usd", "total_input_tokens", "total_output_tokens", "calls")
+    return dict(zip(keys, row))
+
+
 def brain_log(limit: int = 100, as_of: str | None = None) -> pd.DataFrame:
     """讀取最近的 LLM 呼叫/驗證記錄（供大腦活動頁）。"""
     sql = "SELECT id, ts, as_of, stock_id, agent, model, prompt, response, note, run_id FROM brain_log"

@@ -180,7 +180,12 @@ SCHEMA: dict[str, str] = {
             prompt     TEXT,               -- 送出的 user prompt
             response   TEXT,               -- 原始回應（JSON 字串）
             note       TEXT,               -- 驗證層攔截等備註
-            run_id     TEXT                -- 同一次決策管線的批次識別（分組用）
+            run_id     TEXT,               -- 同一次決策管線的批次識別（分組用）
+            input_tokens       INTEGER,    -- 該次呼叫的輸入 token（未快取部分）
+            output_tokens      INTEGER,
+            cache_read_tokens  INTEGER,    -- 快取讀取 token（約 0.1x 價）
+            cache_write_tokens INTEGER,    -- 快取寫入 token（約 1.25x 價）
+            cost_usd           REAL        -- 依模型價目換算的估計成本（USD）
         )
     """,
     # 交易計畫（交易員 Agent 產出，供選股報告與後續執行）
@@ -318,6 +323,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(brain_log)").fetchall()]
     if cols and "run_id" not in cols:
         conn.execute("ALTER TABLE brain_log ADD COLUMN run_id TEXT")
+    # LLM 用量/成本追蹤（供 WebUI 顯示 Claude credit 花費與剩餘估計）
+    if cols:
+        for col, ddl in (("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"),
+                         ("cache_read_tokens", "INTEGER"), ("cache_write_tokens", "INTEGER"),
+                         ("cost_usd", "REAL")):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE brain_log ADD COLUMN {col} {ddl}")
     # 下市標記：stock_info（FinMind 清單含歷史下市代號，需旗標過濾）
     cols = [r[1] for r in conn.execute("PRAGMA table_info(stock_info)").fetchall()]
     if cols and "delisted" not in cols:

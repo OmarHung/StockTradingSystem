@@ -98,7 +98,8 @@ def call_structured(
                 **kwargs,
             )
             result = resp.parsed_output
-            _log_call(agent, m, user_prompt, result.model_dump_json(), stock_id, as_of)
+            _log_call(agent, m, user_prompt, result.model_dump_json(), stock_id, as_of,
+                      usage=getattr(resp, "usage", None))
             return result
         except (anthropic.RateLimitError, anthropic.InternalServerError,
                 anthropic.APITimeoutError, anthropic.APIConnectionError) as e:
@@ -115,14 +116,25 @@ def call_structured(
     raise LLMUnavailable(f"所有模型都失敗：{last_err}")
 
 
-def _log_call(agent, model, prompt, response, stock_id, as_of) -> None:
+def _log_call(agent, model, prompt, response, stock_id, as_of, usage=None) -> None:
+    # token 用量與成本估算（供 WebUI 顯示 Claude credit 花費/剩餘）
+    tk = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    if usage is not None:
+        tk["input_tokens"] = getattr(usage, "input_tokens", 0) or 0
+        tk["output_tokens"] = getattr(usage, "output_tokens", 0) or 0
+        tk["cache_read_tokens"] = getattr(usage, "cache_read_input_tokens", 0) or 0
+        tk["cache_write_tokens"] = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cost = model_caps.estimate_cost(model or "", **tk)
     try:
         with db.connect(get_settings().db_path) as conn:
             conn.execute(
-                "INSERT INTO brain_log (ts, as_of, stock_id, agent, model, prompt, response, run_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO brain_log (ts, as_of, stock_id, agent, model, prompt, response, run_id, "
+                "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (dt.datetime.now().isoformat(timespec="seconds"), as_of, stock_id,
-                 agent, model, prompt, response, _run_id.get()),
+                 agent, model, prompt, response, _run_id.get(),
+                 tk["input_tokens"], tk["output_tokens"],
+                 tk["cache_read_tokens"], tk["cache_write_tokens"], cost),
             )
     except Exception as e:  # noqa: BLE001 — 記錄失敗不應中斷主流程
         log.error("brain_log 寫入失敗：%s", e)

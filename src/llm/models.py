@@ -27,6 +27,30 @@ _STATIC: dict[str, dict] = {
     "claude-sonnet-4-6": {"display_name": "Claude Sonnet 4.6", "context_window": 1_000_000, "max_output": 64_000,  "supports_thinking": True},
     "claude-haiku-4-5":  {"display_name": "Claude Haiku 4.5",  "context_window": 200_000,   "max_output": 64_000,  "supports_thinking": False},
 }
+# 模型價目表（USD / 每百萬 token），供 credit 花費估算。
+# 快取讀取約 0.1x 輸入價、快取寫入（5 分鐘 TTL）約 1.25x 輸入價。
+# key 同樣以前綴比對；未知模型以 Opus 價位保守估計。
+_PRICING: dict[str, tuple[float, float]] = {  # (input, output)
+    "claude-fable-5":    (10.0, 50.0),
+    "claude-opus-4":     (5.0, 25.0),   # 涵蓋 opus-4-5 ~ 4-8
+    "claude-sonnet-4":   (3.0, 15.0),
+    "claude-haiku-4-5":  (1.0, 5.0),
+}
+_DEFAULT_PRICE = (5.0, 25.0)
+
+
+def estimate_cost(model_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
+                  cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> float:
+    """依價目表把一次呼叫的 token 用量換算成估計成本（USD）。"""
+    inp, out = _match(_PRICING, model_id) or _DEFAULT_PRICE
+    return (
+        input_tokens * inp
+        + output_tokens * out
+        + cache_read_tokens * inp * 0.1
+        + cache_write_tokens * inp * 1.25
+    ) / 1_000_000
+
+
 # 未知模型的保守預設：不開思考、低 output 上限（避免對不支援的模型送出會 400 的參數）。
 _DEFAULT_CAPS: dict = {"display_name": None, "context_window": 200_000, "max_output": 8_000, "supports_thinking": False}
 

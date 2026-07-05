@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FlaskConical, FolderOpen, Database, Newspaper, Settings, RotateCcw } from "lucide-react";
-import { api, type Quote } from "../api";
+import { api, type LlmUsage, type Quote } from "../api";
 import { fmt, cls } from "./Panel";
 
 /** 頂部狀態列：logo、券商環境徽章、大盤指標、時鐘、資料連線狀態、設定。 */
@@ -16,11 +16,15 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
 }) {
   const [now, setNow] = useState(new Date());
   const [indices, setIndices] = useState<Quote[]>([]);
+  const [usage, setUsage] = useState<LlmUsage | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     api.indices().then(setIndices).catch(() => {});
-    return () => clearInterval(t);
+    const loadUsage = () => api.llmUsage().then(setUsage).catch(() => {});
+    loadUsage();
+    const u = setInterval(loadUsage, 60_000);
+    return () => { clearInterval(t); clearInterval(u); };
   }, []);
 
   return (
@@ -56,6 +60,22 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
       <span className="badge" style={hasKey ? {} : { background: "#3a2a1a", color: "#f0b90b", borderColor: "#5a3a1a" }}>
         {hasKey === null ? "…" : hasKey ? "AI 已啟用" : "AI 未設 Key"}
       </span>
+      {usage && (() => {
+        const remain = usage.remaining_usd;
+        const low = remain != null && usage.credit_total_usd != null && remain / usage.credit_total_usd < 0.1;
+        const tip = `Claude 用量（本地估算）\n今日：$${usage.today_usd.toFixed(2)}　本月：$${usage.month_usd.toFixed(2)}　累計：$${usage.total_usd.toFixed(2)}\n`
+          + `呼叫 ${usage.calls} 次｜輸入 ${(usage.total_input_tokens / 1000).toFixed(0)}K / 輸出 ${(usage.total_output_tokens / 1000).toFixed(0)}K tokens`
+          + (remain != null ? `\n儲值 $${usage.credit_total_usd!.toFixed(0)} → 估計剩餘 $${remain.toFixed(2)}` : "\n（到設定中心 LLM 頁填入儲值總額即可顯示剩餘）");
+        return (
+          <span className="badge" title={tip} style={low
+            ? { background: "rgba(255,67,61,0.18)", color: "var(--up)", borderColor: "var(--up)" }
+            : {}}>
+            {remain != null
+              ? `💳 剩餘 $${remain.toFixed(2)}`
+              : `💳 本月 $${usage.month_usd.toFixed(2)}`}
+          </span>
+        );
+      })()}
       <button className="btn icon-btn" onClick={onOpenBacktest}><FlaskConical size={13} /> 回測</button>
       <button className="btn icon-btn" onClick={onOpenBrowser}><FolderOpen size={13} /> 股票</button>
       <button className="btn icon-btn" onClick={onOpenNews}><Newspaper size={13} /> 新聞</button>

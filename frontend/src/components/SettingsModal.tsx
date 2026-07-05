@@ -184,6 +184,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
+              <NumRow label="Credit 儲值總額 (USD)" step={10}
+                value={cfg.llm?.credit_total_usd ?? 0} onChange={(v) => setField("llm", "credit_total_usd", v)} />
+              <div className="form-hint">
+                Anthropic 官方 API 沒有查餘額的端點，系統改用本地估算：每次 LLM 呼叫記錄 token 用量並依模型價目換算。
+                填入你在 Console 的儲值總額（0 = 不估算剩餘），頂部狀態列即顯示估計剩餘 credit。改動請按「儲存此頁」。
+              </div>
+              <LlmUsageRow />
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <button className="btn" style={{ borderColor: "var(--up)", color: "var(--up)" }}
                   onClick={async () => {
@@ -256,6 +266,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
+
+/** LLM 用量明細（今日/本月/累計花費，本地估算）。 */
+function LlmUsageRow() {
+  const [u, setU] = useState<import("../api").LlmUsage | null>(null);
+  useEffect(() => { api.llmUsage().then(setU).catch(() => {}); }, []);
+  if (!u) return null;
+  return (
+    <div style={{ display: "flex", gap: 18, fontSize: 12, color: "var(--text-dim)",
+      background: "#0d1119", borderRadius: 6, padding: "8px 12px", marginTop: 8 }}>
+      <span>今日 <b style={{ color: "var(--text)" }}>${u.today_usd.toFixed(2)}</b></span>
+      <span>本月 <b style={{ color: "var(--text)" }}>${u.month_usd.toFixed(2)}</b></span>
+      <span>累計 <b style={{ color: "var(--text)" }}>${u.total_usd.toFixed(2)}</b></span>
+      <span>呼叫 {u.calls} 次</span>
+      {u.remaining_usd != null && (
+        <span>估計剩餘 <b style={{ color: "var(--text)" }}>${u.remaining_usd.toFixed(2)}</b></span>
+      )}
+    </div>
+  );
+}
+
 
 /** 通知分頁：Telegram Bot 每日決策報告（token/chat_id 屬個人資訊存 .env，開關存 settings.yaml）。 */
 function NotifyTab({ cfg, setCfg, env, flash, onEnvSaved }: {

@@ -52,6 +52,7 @@ llm:
   analyst_model: claude-opus-4-7
   trader_model: claude-sonnet-4-6
   reflection_model: claude-opus-4-8
+  credit_total_usd: 26.93          # Console 儲值總額（USD）；填入後頂部顯示估計剩餘 credit，0=不估算
 
 # ---- 新聞判讀（第四位分析師；只對進入 LLM 深度分析的個股按需抓取，省 FinMind 額度）----
 news:

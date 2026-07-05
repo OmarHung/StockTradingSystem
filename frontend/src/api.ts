@@ -67,6 +67,17 @@ export interface ModelInfo {
   supports_thinking: boolean;
 }
 
+export interface LlmUsage {
+  total_usd: number;
+  today_usd: number;
+  month_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  calls: number;
+  credit_total_usd: number | null;
+  remaining_usd: number | null;
+}
+
 export const api = {
   health: () => get<{ status: string; has_api_key: boolean; broker_env: "simulation" | "production"; broker_ready: boolean }>("/health"),
   dataStatus: () => get<DataStatus>("/data-status"),
@@ -133,6 +144,7 @@ export const api = {
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),
   tradePlansLatestDate: () => get<{ as_of: string | null }>("/trade-plans/latest-date"),
   brainLog: (limit = 100) => get<Record<string, any>[]>(`/brain-log?limit=${limit}`),
+  llmUsage: () => get<LlmUsage>("/llm-usage"),
   // 設定
   models: (topN = 5) => get<ModelInfo[]>(`/models?top_n=${topN}`),
   getConfig: () => get<Record<string, any>>("/config"),
