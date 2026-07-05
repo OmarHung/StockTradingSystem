@@ -902,3 +902,11 @@ def scanner(kind: str = "change_pct_up", count: int = 20):
         return shioaji_source.get_scanners(kind, count)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"排行查詢失敗：{e}")
+
+
+# ---- WebUI 靜態檔（部署用；frontend/ 內 npm run build 產出）----
+# 掛在所有 /api 路由之後，開發模式（無 dist、走 vite dev server）不受影響。
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="webui")

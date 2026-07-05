@@ -94,7 +94,7 @@ export const api = {
     capital_changes: { date: string; kind: string; before: number; after: number }[];
   }>(`/stocks/${id}/events`),
   uiLayoutGet: () => get<{ layout: any[] | null }>("/ui/layout"),
-  uiLayoutSave: (layout: any[]) => put<{ saved: boolean }>("/ui/layout", { layout }),
+  uiLayoutSave: (layout: readonly any[]) => put<{ saved: boolean }>("/ui/layout", { layout }),
   uiLayoutReset: () => del<{ reset: boolean }>("/ui/layout"),
   schedulerStatus: () => get<Record<string, any>[]>("/scheduler/status"),
   schedulerConfig: (name: string, enabled: boolean, time: string) =>
@@ -133,7 +133,9 @@ export const api = {
   analyzeCancel: () =>
     post<{ cancelled: boolean; running: boolean }>("/analyze/cancel", {}),
   newsAll: (q = "", stockId = "", limit = 300) =>
-    get<Record<string, any>[]>(`/news?limit=${limit}&q_kw=${encodeURIComponent(q)}&stock_id=${encodeURIComponent(stockId)}`),
+    get<{ stock_id: string; name: string; date: string; published_at: string;
+          title: string; source: string; url: string }[]>(
+      `/news?limit=${limit}&q_kw=${encodeURIComponent(q)}&stock_id=${encodeURIComponent(stockId)}`),
   scoutDates: () => get<{ as_of: string; source: string; headlines: number; candidates: number }[]>("/scout/dates"),
   scout: (asOf: string) => get<{
     as_of: string; source: string; summary: string;
