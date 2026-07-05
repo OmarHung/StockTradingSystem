@@ -71,7 +71,7 @@ bash scripts/dev.sh
 .venv/bin/python -m scripts.backfill --auto-wait          # 全市場資料回補
 .venv/bin/python -m scripts.run_daily                     # 每日交易主流程
 .venv/bin/python -m scripts.run_backtest --strategy screener_risk
-.venv/bin/python -m pytest tests/ -q                      # 44 tests
+.venv/bin/python -m pytest tests/ -q                      # 47 tests
 ```
 
 ## 專案結構
