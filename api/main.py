@@ -559,11 +559,18 @@ def clear_ai_data():
     不動行情資料（股價/法人/營收/個股新聞原文等）、模擬交易帳本（positions/orders/fills），
     也不動量化選股快照（screener_result 是純量化排名，非 LLM 產出，可隨時重算）。
     """
+    import sqlite3
+
     tables = ("brain_log", "trade_plan", "friction_log", "scout_log")
     deleted: dict = {}
-    with db.connect(get_settings().db_path) as conn:
-        for t in tables:
-            deleted[t] = conn.execute(f"DELETE FROM {t}").rowcount
+    try:
+        with db.connect(get_settings().db_path) as conn:
+            for t in tables:
+                deleted[t] = conn.execute(f"DELETE FROM {t}").rowcount
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e):
+            raise HTTPException(409, "資料庫正被背景任務寫入中，請等任務結束或先停止任務再清除")
+        raise
     from src.memory import store as memory_store
     deleted["memory"] = memory_store.clear_all()
     return {"status": "cleared", "deleted": deleted}

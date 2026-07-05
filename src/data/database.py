@@ -339,8 +339,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
 def get_connection(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    # timeout：寫入鎖被背景任務占用時最多等 30 秒，避免動輒 database is locked
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")   # 較好的併發讀寫
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
