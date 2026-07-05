@@ -329,6 +329,40 @@ def analyze(req: AnalyzeReq):
     return pipeline.analyze_stocks(picks, req.as_of, sources=sources)
 
 
+@app.get("/api/news")
+def news_all(limit: int = 300, q_kw: str = "", stock_id: str = ""):
+    """庫存個股新聞（新到舊，含股名）。q_kw 過濾標題、stock_id 過濾個股。"""
+    sql = ("SELECT n.stock_id, COALESCE(s.stock_name,'') AS name, n.date, "
+           "n.published_at, n.title, n.source, n.url "
+           "FROM news n LEFT JOIN stock_info s ON s.stock_id = n.stock_id")
+    conds, params = [], []
+    if stock_id.strip():
+        conds.append("n.stock_id = ?")
+        params.append(stock_id.strip())
+    if q_kw.strip():
+        conds.append("n.title LIKE ?")
+        params.append(f"%{q_kw.strip()}%")
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY n.date DESC, n.published_at DESC LIMIT ?"
+    params.append(max(1, min(limit, 1000)))
+    with db.connect(get_settings().db_path) as conn:
+        return _records(db.read_sql(conn, sql, tuple(params)))
+
+
+@app.get("/api/scout/dates")
+def scout_dates():
+    """已有題材偵察快照的日期清單（新到舊，含統計）。"""
+    with db.connect(get_settings().db_path) as conn:
+        conn.execute(db.SCHEMA["scout_log"])
+        rows = conn.execute(
+            "SELECT as_of, source, headlines_json, candidates_json FROM scout_log "
+            "ORDER BY as_of DESC LIMIT 60").fetchall()
+    return [{"as_of": r[0], "source": r[1],
+             "headlines": len(json.loads(r[2] or "[]")),
+             "candidates": len(json.loads(r[3] or "[]"))} for r in rows]
+
+
 @app.get("/api/scout")
 def scout_snapshot(as_of: str):
     """某日政策題材偵察快照（掃到的新聞標題 + 總結 + 候選）；無則回 null。"""

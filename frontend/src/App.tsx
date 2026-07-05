@@ -16,6 +16,7 @@ import { RankingPanel } from "./components/RankingPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { DataModal } from "./components/DataModal";
 import { StockBrowserModal } from "./components/StockBrowserModal";
+import { NewsModal } from "./components/NewsModal";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { PortfolioPanel } from "./components/PortfolioPanel";
 
@@ -41,6 +42,7 @@ export default function App() {
   const [showData, setShowData] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
   const [showBacktest, setShowBacktest] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
   const [layout, setLayout] = useState<Layout>(LAYOUT);
   const layoutLoaded = useRef(false);
@@ -74,14 +76,15 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (showBacktest) setShowBacktest(false);
+      if (showNews) setShowNews(false);
+      else if (showBacktest) setShowBacktest(false);
       else if (showBrowser) setShowBrowser(false);
       else if (showData) setShowData(false);
       else if (showSettings) { setShowSettings(false); refreshKey(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showBacktest, showBrowser, showData, showSettings]);
+  }, [showNews, showBacktest, showBrowser, showData, showSettings]);
   useEffect(() => { api.watchlist().then(setWatchIds).catch(() => {}); }, []);
   useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
 
@@ -101,6 +104,7 @@ export default function App() {
         onOpenData={() => setShowData(true)}
         onOpenBrowser={() => setShowBrowser(true)}
         onOpenBacktest={() => setShowBacktest(true)}
+        onOpenNews={() => setShowNews(true)}
         onResetLayout={resetLayout} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
       {/* 回測視窗常駐掛載（display 切換）：關閉不重置參數/結果/進行中的輪詢 */}
@@ -109,6 +113,7 @@ export default function App() {
       </div>
       {showData && <DataModal onClose={() => setShowData(false)} />}
       {showBrowser && <StockBrowserModal onClose={() => setShowBrowser(false)} onSelect={setSelected} />}
+      {showNews && <NewsModal onClose={() => setShowNews(false)} onSelect={setSelected} />}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <GridLayout
           className="layout"

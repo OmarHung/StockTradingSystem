@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import { FlaskConical, FolderOpen, Database, Settings, RotateCcw } from "lucide-react";
+import { FlaskConical, FolderOpen, Database, Newspaper, Settings, RotateCcw } from "lucide-react";
 import { api, type Quote } from "../api";
 import { fmt, cls } from "./Panel";
 
 /** 頂部狀態列：logo、券商環境徽章、大盤指標、時鐘、資料連線狀態、設定。 */
-export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBrowser, onOpenBacktest, onResetLayout }: {
+export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBrowser, onOpenBacktest, onOpenNews, onResetLayout }: {
   hasKey: boolean | null;
   brokerEnv: "simulation" | "production" | null;
   onOpenSettings: () => void;
   onOpenData: () => void;
   onOpenBrowser: () => void;
   onOpenBacktest: () => void;
+  onOpenNews: () => void;
   onResetLayout: () => void;
 }) {
   const [now, setNow] = useState(new Date());
@@ -57,6 +58,7 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
       </span>
       <button className="btn icon-btn" onClick={onOpenBacktest}><FlaskConical size={13} /> 回測</button>
       <button className="btn icon-btn" onClick={onOpenBrowser}><FolderOpen size={13} /> 股票</button>
+      <button className="btn icon-btn" onClick={onOpenNews}><Newspaper size={13} /> 新聞</button>
       <button className="btn icon-btn" onClick={onOpenData}><Database size={13} /> 資料</button>
       <button className="btn icon-btn" onClick={onOpenSettings}><Settings size={13} /> 設定</button>
       <button className="btn icon-btn" onClick={onResetLayout} title="重置面板佈局"><RotateCcw size={13} /></button>

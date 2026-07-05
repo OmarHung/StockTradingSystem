@@ -111,6 +111,9 @@ export const api = {
     get<{ running: boolean; log: string; result: BacktestResult | null }>("/backtest/status"),
   analyze: (asOf: string, topN: number) =>
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
+  newsAll: (q = "", stockId = "", limit = 300) =>
+    get<Record<string, any>[]>(`/news?limit=${limit}&q_kw=${encodeURIComponent(q)}&stock_id=${encodeURIComponent(stockId)}`),
+  scoutDates: () => get<{ as_of: string; source: string; headlines: number; candidates: number }[]>("/scout/dates"),
   scout: (asOf: string) => get<{
     as_of: string; source: string; summary: string;
     headlines: { date: string; title: string; source: string; url: string }[];
