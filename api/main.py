@@ -321,6 +321,14 @@ def trade_plans(as_of: str):
     return pipeline.load_plans(as_of)
 
 
+@app.get("/api/trade-plans/latest-date")
+def trade_plans_latest_date():
+    """最近一次有交易計畫的 as_of（供報告面板預設載入）。"""
+    with db.connect(get_settings().db_path) as conn:
+        row = conn.execute("SELECT MAX(as_of) FROM trade_plan").fetchone()
+    return {"as_of": row[0] if row else None}
+
+
 @app.get("/api/brain-log")
 def brain_log(limit: int = 100):
     return _records(q.brain_log(limit=limit))

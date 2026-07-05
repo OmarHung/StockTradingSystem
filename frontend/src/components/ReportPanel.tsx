@@ -24,17 +24,21 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
     ).catch(() => {});
   }, []);
 
-  // 預設帶入最新交易日；順便載回該日已存的交易計畫（重整後不遺失）
+  // 預設日期＝最近一次有計畫的日子（每日流程/手動分析皆算），沒有才用最新交易日
   useEffect(() => {
-    api.dataStatus().then((s) => {
-      if (s.latest_trading_day) {
-        setAsOf(s.latest_trading_day);
-        api.tradePlans(s.latest_trading_day)
-          .then((plans) => { if (plans.length) setRecs(plans); })
-          .catch(() => {});
-      }
-    }).catch(() => {});
+    Promise.all([api.tradePlansLatestDate().catch(() => ({ as_of: null })),
+                 api.dataStatus().catch(() => null)])
+      .then(([latest, s]) => {
+        const d = latest.as_of || s?.latest_trading_day;
+        if (d) setAsOf(d);
+      });
   }, []);
+
+  // 日期切換（含初始）→ 載入該日已存計畫；報告不再被日期藏起來
+  useEffect(() => {
+    if (!asOf) return;
+    api.tradePlans(asOf).then(setRecs).catch(() => {});
+  }, [asOf]);
 
   const run = async () => {
     setLoading(true);

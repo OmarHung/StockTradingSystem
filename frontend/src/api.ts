@@ -112,6 +112,7 @@ export const api = {
   analyze: (asOf: string, topN: number) =>
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),
+  tradePlansLatestDate: () => get<{ as_of: string | null }>("/trade-plans/latest-date"),
   brainLog: (limit = 100) => get<Record<string, any>[]>(`/brain-log?limit=${limit}`),
   // 設定
   models: (topN = 5) => get<ModelInfo[]>(`/models?top_n=${topN}`),
