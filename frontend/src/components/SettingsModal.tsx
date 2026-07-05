@@ -148,6 +148,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </>)}
 
           {tab === "screener" && (<>
+            <div className="form-row">
+              <label>盤後 LLM 深度分析檔數</label>
+              <input type="number" min={1} max={10} value={cfg.daily?.top_n ?? 3}
+                onChange={async (e) => {
+                  const v = Math.max(1, Math.min(10, Number(e.target.value)));
+                  setField("daily", "top_n", v);
+                  try { await api.updateConfig("daily", { top_n: v }); flash("已儲存 ✓"); }
+                  catch (err) { alert(String(err)); }
+                }} />
+            </div>
+            <div className="form-hint">
+              每日流程從量化排行取前 N 檔進 AI 決策（排程/手動皆用此值；成本 ≈ N × 5 次 LLM 呼叫）。改動即存。
+            </div>
             <NumRow label="選出檔數 Top N" value={cfg.screener?.top_n} onChange={(v) => setField("screener", "top_n", v)} />
             <NumRow label="20日均成交額下限 (元)" step={1000000} value={cfg.screener?.min_avg_turnover} onChange={(v) => setField("screener", "min_avg_turnover", v)} />
             <NumRow label="籌碼回看天數" value={cfg.screener?.chips_lookback} onChange={(v) => setField("screener", "chips_lookback", v)} />

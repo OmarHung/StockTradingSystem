@@ -62,6 +62,10 @@ logging:
   level: INFO
   dir: logs
 
+# ---- 每日交易主流程 ----
+daily:
+  top_n: 3                         # 盤後送進 LLM 深度分析的檔數（決策成本 ≈ top_n × 5 次呼叫）
+
 # ---- 後端內建排程（取代 launchd；WebUI 設定頁可調）----
 scheduler:
   intraday:

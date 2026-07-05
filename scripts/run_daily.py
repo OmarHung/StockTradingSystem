@@ -29,12 +29,18 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="每日交易主流程")
     ap.add_argument("--as-of", help="執行日期（預設今天）")
-    ap.add_argument("--top-n", type=int, default=3, help="盤後決策檔數")
+    ap.add_argument("--top-n", type=int, default=None, help="盤後決策檔數（預設讀 settings.yaml daily.top_n）")
     ap.add_argument("--no-decide", action="store_true", help="跳過決策（只撮合/風控/快照）")
     args = ap.parse_args()
 
     from src.pipeline.daily import run_daily
-    summary = run_daily(as_of=args.as_of, top_n=args.top_n, decide=not args.no_decide)
+    top_n = args.top_n
+    if top_n is None:
+        try:
+            top_n = int(cfg["daily"]["top_n"])
+        except Exception:  # noqa: BLE001
+            top_n = 3
+    summary = run_daily(as_of=args.as_of, top_n=top_n, decide=not args.no_decide)
     print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
 
 

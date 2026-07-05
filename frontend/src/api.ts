@@ -122,8 +122,8 @@ export const api = {
   portfolio: () => get<Record<string, any>>("/portfolio"),
   portfolioReset: () => post<{ status: string; cash: number }>("/portfolio/reset", {}),
   tradingToggle: (enabled: boolean) => post<{ trading_enabled: boolean }>("/trading/toggle", { enabled }),
-  dailyRun: (asOf?: string, topN = 3) =>
-    post<{ started: boolean }>("/daily/run", { as_of: asOf, top_n: topN }),
+  dailyRun: (asOf?: string, topN?: number) =>
+    post<{ started: boolean }>("/daily/run", { as_of: asOf ?? null, top_n: topN ?? null }),
   dailyStatus: () => get<{ running: boolean; log: string }>("/daily/status"),
   // Phase 4：反思與向量記憶
   memoryStatus: () => get<{ experiences: number; rules: number; blocked: number }>("/memory/status"),

@@ -384,7 +384,7 @@ def trading_toggle(req: TradingToggle):
 
 class DailyRunReq(BaseModel):
     as_of: str | None = None
-    top_n: int = 3
+    top_n: int | None = None   # None = 用 settings.yaml daily.top_n
 
 
 @app.post("/api/daily/run")
@@ -392,7 +392,9 @@ def daily_run(req: DailyRunReq):
     """背景執行每日主流程（撮合→風控→快照→決策掛單）。"""
     if jobs.is_running(_DAILY_JOB):
         raise HTTPException(409, "每日流程已在執行中")
-    args = ["scripts.run_daily", "--top-n", str(req.top_n)]
+    args = ["scripts.run_daily"]
+    if req.top_n:
+        args += ["--top-n", str(req.top_n)]
     if req.as_of:
         args += ["--as-of", req.as_of]
     started = jobs.start_job(_DAILY_JOB, args)
