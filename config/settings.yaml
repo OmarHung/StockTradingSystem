@@ -49,9 +49,10 @@ shioaji:
   environment: simulation          # simulation=模擬（預設） / production=正式（真金白銀，Phase 5 交易用）
 
 llm:
-  analyst_model: claude-opus-4-7
-  trader_model: claude-sonnet-4-6
+  analyst_model: claude-sonnet-5
+  trader_model: claude-sonnet-5
   reflection_model: claude-opus-4-8
+  scout_model: claude-sonnet-5   # 題材判讀模型（scout；source=web 時亦需支援 web_search 工具）
 
 # ---- 新聞判讀（第四位分析師；只對進入 LLM 深度分析的個股按需抓取，省 FinMind 額度）----
 news:
@@ -60,8 +61,7 @@ news:
   scout:                           # 政策題材偵察：掃政策新聞，把題材股補進候選池
     enabled: true
     source: rss                    # rss=免費新聞RSS關鍵字(預設) / web=Claude web search（RSS全掛時自動備援）
-    model: claude-sonnet-4-6       # 判讀模型（source=web 時亦需支援 web_search 工具）
-    max_candidates: 3              # 每日最多補幾檔（額外名額，不佔量化 top_n）
+    max_candidates: 5              # 每日最多補幾檔（額外名額，不佔量化 top_n）
     keywords:                      # Google News 搜尋關鍵字（可自行增減）
       - 政策 台股
       - 補助 產業

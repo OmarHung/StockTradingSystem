@@ -178,9 +178,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <ModelRow label="分析師模型" value={cfg.llm?.analyst_model} models={models} onChange={(v) => setField("llm", "analyst_model", v)} />
             <ModelRow label="交易員模型" value={cfg.llm?.trader_model} models={models} onChange={(v) => setField("llm", "trader_model", v)} />
             <ModelRow label="反思模型" value={cfg.llm?.reflection_model} models={models} onChange={(v) => setField("llm", "reflection_model", v)} />
+            <ModelRow label="題材判讀模型" value={cfg.llm?.scout_model} models={models} onChange={(v) => setField("llm", "scout_model", v)} />
             <div className="form-hint" style={{ margin: 0 }}>
               清單為 Claude 最新前 5 個模型（即時查詢）。⚡ 表示支援思考模式；ctx 為上下文上限、out 為輸出上限。
               交易員/反思建議選支援思考的模型；不支援思考者系統會自動關閉思考參數。
+              題材判讀用於政策新聞掃描（scout），新聞來源設為 web search 時需選支援 web_search 工具的模型。
             </div>
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>

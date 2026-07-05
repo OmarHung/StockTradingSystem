@@ -47,7 +47,9 @@ def run_news_scout(as_of: str) -> list[dict]:
     scfg = ncfg.get("scout") or {}
     if not scfg.get("enabled", True):
         return []
-    model = scfg.get("model", "claude-sonnet-4-6")
+    # 判讀模型設定在 llm 區塊（WebUI 設定中心可改）；舊位置 news.scout.model 向下相容
+    llm_cfg = get_settings().get("llm") or {}
+    model = llm_cfg.get("scout_model") or scfg.get("model") or "claude-sonnet-4-6"
     max_c = int(scfg.get("max_candidates", 3))
     source = scfg.get("source", "rss")
 
