@@ -1,15 +1,16 @@
 import { Settings } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { api, type ModelInfo } from "../api";
 import { MoneyInput } from "./Panel";
 
-type Tab = "capital" | "risk" | "screener" | "llm" | "sched" | "keys";
+type Tab = "capital" | "risk" | "screener" | "llm" | "sched" | "notify" | "keys";
 const TABS: { id: Tab; label: string }[] = [
   { id: "capital", label: "💰 資金" },
   { id: "risk", label: "🛡️ 風險" },
   { id: "screener", label: "🔍 選股" },
   { id: "llm", label: "🤖 LLM" },
   { id: "sched", label: "⏰ 排程" },
+  { id: "notify", label: "📨 通知" },
   { id: "keys", label: "🔑 API 金鑰" },
 ];
 
@@ -93,7 +94,8 @@ function SchedulerTab() {
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("capital");
   const [cfg, setCfg] = useState<Record<string, any> | null>(null);
-  const [env, setEnv] = useState<{ finmind_token: boolean; anthropic_key: boolean } | null>(null);
+  const [env, setEnv] = useState<{ finmind_token: boolean; anthropic_key: boolean;
+    shioaji_key?: boolean; telegram_token?: boolean } | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [saved, setSaved] = useState("");
 
@@ -205,6 +207,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
           {tab === "sched" && <SchedulerTab />}
 
+          {tab === "notify" && (
+            <NotifyTab cfg={cfg} setCfg={setCfg} env={env} flash={flash}
+              onEnvSaved={() => api.envStatus().then(setEnv)} />
+          )}
+
           {tab === "keys" && (<>
             <KeysTab env={env} onSaved={(k) => { flash("金鑰已寫入 .env ✓"); api.envStatus().then(setEnv); void k; }} />
 
@@ -247,6 +254,73 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** 通知分頁：Telegram Bot 每日決策報告（token/chat_id 屬個人資訊存 .env，開關存 settings.yaml）。 */
+function NotifyTab({ cfg, setCfg, env, flash, onEnvSaved }: {
+  cfg: Record<string, any>;
+  setCfg: Dispatch<SetStateAction<Record<string, any> | null>>;
+  env: { telegram_token?: boolean; telegram_chat?: boolean } | null;
+  flash: (m: string) => void;
+  onEnvSaved: () => void;
+}) {
+  const [token, setToken] = useState("");
+  const [chatId, setChatId] = useState("");
+  const [testing, setTesting] = useState(false);
+  const tg = cfg.notify?.telegram ?? {};
+
+  const saveEnv = async (key: string, value: string, label: string) => {
+    if (!value.trim()) return;
+    try { await api.setEnv(key, value); flash(`${label} 已寫入 .env ✓`); onEnvSaved(); }
+    catch (e) { alert(String(e)); }
+  };
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      await api.notifyTest();
+      flash("測試訊息已發送 ✓ 請查看 Telegram");
+    } catch (e) { alert(String(e)); }
+    finally { setTesting(false); }
+  };
+
+  return (
+    <>
+      <div className="form-row">
+        <label>Bot Token {env?.telegram_token ? "✅" : "⚠️未設"}</label>
+        <input type="password" placeholder="留空則不變更" value={token} onChange={(e) => setToken(e.target.value)} />
+        <button className="btn" onClick={() => { saveEnv("TELEGRAM_BOT_TOKEN", token, "Token"); setToken(""); }}>存</button>
+      </div>
+      <div className="form-hint">在 Telegram 找 @BotFather → /newbot 建立 Bot 取得 token。</div>
+
+      <div className="form-row">
+        <label>Chat ID {env?.telegram_chat ? "✅" : "⚠️未設"}</label>
+        <input type="text" placeholder="留空則不變更，例：123456789" value={chatId}
+          onChange={(e) => setChatId(e.target.value)} />
+        <button className="btn" onClick={() => { saveEnv("TELEGRAM_CHAT_ID", chatId, "Chat ID"); setChatId(""); }}>存</button>
+      </div>
+      <div className="form-hint">
+        先傳任意訊息給你的 Bot，再開 api.telegram.org/bot&lt;token&gt;/getUpdates，
+        取 message.chat.id（群組為負數）。兩者皆存 .env，不會進 git。
+      </div>
+
+      <div className="form-row">
+        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+          <input type="checkbox" checked={!!tg.enabled}
+            onChange={(e) => setCfg((c) => ({ ...c, notify: { ...c!.notify, telegram: { ...c!.notify?.telegram, enabled: e.target.checked } } }))} />
+          啟用每日決策報告
+        </label>
+        <div style={{ flex: 1 }} />
+        <button className="btn" disabled={testing} onClick={sendTest}>
+          {testing ? "發送中…" : "📨 發送測試訊息"}
+        </button>
+      </div>
+      <div className="form-hint">
+        啟用後，每日流程（排程或手動）完成即推送報告：權益快照、開盤撮合、風控出場、
+        AI 決策明細與明日委託。發送失敗只記日誌，不影響交易流程。
+        開關改動請按下方「儲存此頁」。
+      </div>
+    </>
   );
 }
 

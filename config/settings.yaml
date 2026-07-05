@@ -64,6 +64,11 @@ logging:
 daily:
   top_n: 5                         # 盤後送進 LLM 深度分析的檔數（決策成本 ≈ top_n × 5 次呼叫）
 
+# ---- 通知（每日決策報告推送）----
+notify:
+  telegram:
+    enabled: true                  # Bot Token 與 Chat ID 屬個人資訊，存 .env（TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID）
+
 # ---- 後端內建排程（取代 launchd；WebUI 設定頁可調）----
 scheduler:
   intraday:

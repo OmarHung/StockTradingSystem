@@ -516,6 +516,8 @@ def env_status():
         "finmind_token": bool(os.getenv("FINMIND_TOKEN")),
         "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")),
         "shioaji_key": bool(os.getenv("SJ_API_KEY")) and bool(os.getenv("SJ_SEC_KEY")),
+        "telegram_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+        "telegram_chat": bool(os.getenv("TELEGRAM_CHAT_ID")),
     }
 
 
@@ -524,7 +526,8 @@ class EnvUpdate(BaseModel):
     value: str
 
 
-_ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY", "SJ_API_KEY", "SJ_SEC_KEY"}
+_ALLOWED_ENV = {"FINMIND_TOKEN", "ANTHROPIC_API_KEY", "SJ_API_KEY", "SJ_SEC_KEY",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
 
 
 @app.post("/api/set-env")
@@ -535,6 +538,18 @@ def set_env(req: EnvUpdate):
         raise HTTPException(400, "值不可為空")
     config_io.set_env_var(req.key, req.value.strip())
     return {"status": "saved"}
+
+
+# ---------- 通知（Telegram Bot）----------
+@app.post("/api/notify/test")
+def notify_test():
+    """發送測試訊息（不看 enabled 開關，只需 token + chat_id）。"""
+    from src.notify import telegram
+    try:
+        telegram.send_message("✅ <b>StockTradingSystem</b>\nTelegram 通知已就緒，每日決策報告將發送到此對話。")
+    except Exception as e:  # noqa: BLE001 — 把設定/API 錯誤原樣回給前端
+        raise HTTPException(400, str(e))
+    return {"sent": True}
 
 
 # ---------- 資料管理（背景回補；資料表建立由回補自動處理）----------

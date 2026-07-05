@@ -22,6 +22,16 @@ log = get_logger("daily")
 
 def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
               reflect_weekly: bool = True) -> dict:
+    summary = _run_daily(as_of=as_of, top_n=top_n, decide=decide,
+                         reflect_weekly=reflect_weekly)
+    # 流程收尾：Telegram 每日報告（未設定則跳過；失敗只記 log，不影響交易）
+    from src.notify import telegram
+    telegram.send_daily_report(summary)
+    return summary
+
+
+def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
+               reflect_weekly: bool = True) -> dict:
     as_of = as_of or dt.date.today().isoformat()
     broker = PaperBroker()
     summary: dict = {"as_of": as_of}
@@ -81,9 +91,13 @@ def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     log.info("盤後決策候選：%s", picks)
 
     orders = []
+    decisions = []  # 每檔決策明細（含不掛單原因，供每日報告）
+    summary["decisions"] = decisions
     for sid in picks:
         rec = agent_pipeline.analyze_stock(sid, as_of)
         if not rec:
+            decisions.append({"stock_id": sid, "action": "error",
+                              "ordered": False, "note": "分析失敗"})
             continue
         plan, guard = rec["plan"], rec.get("guard")
         if plan["action"] == "buy" and guard and guard["approved"] and guard["shares"] > 0:
@@ -95,16 +109,25 @@ def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
             )
             if oid is None:
                 log.warning("⛔ 交易已緊急停止（流程中途按下），%s 掛單被拒", sid)
+                decisions.append({"stock_id": sid, "action": plan["action"],
+                                  "confidence": plan.get("confidence"),
+                                  "ordered": False, "note": "緊急停止，掛單被拒"})
                 continue
             orders.append({"order_id": oid, "stock_id": sid, "shares": guard["shares"],
                            "limit": plan["entry_high"], "stop": plan.get("stop_loss"),
                            "target": plan.get("target_price")})
+            decisions.append({"stock_id": sid, "action": plan["action"],
+                              "confidence": plan.get("confidence"),
+                              "ordered": True, "note": None})
             log.info("掛明日限價單 #%d %s %d 股 @≤%s（損 %s / 標 %s）",
                      oid, sid, guard["shares"], plan["entry_high"],
                      plan.get("stop_loss"), plan.get("target_price"))
         else:
             reason = plan["action"] if plan["action"] != "buy" else \
                 (guard or {}).get("reject_reason", "guard 未核准")
+            decisions.append({"stock_id": sid, "action": plan["action"],
+                              "confidence": plan.get("confidence"), "ordered": False,
+                              "note": None if plan["action"] != "buy" else reason})
             log.info("不掛單 %s：%s", sid, reason)
     summary["orders"] = orders
     return summary
