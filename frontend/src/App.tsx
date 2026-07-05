@@ -47,6 +47,19 @@ export default function App() {
 
   const refreshKey = () => api.health().then((h) => { setHasKey(h.has_api_key); setBrokerEnv(h.broker_env); }).catch(() => setHasKey(false));
   useEffect(() => { refreshKey(); }, []);
+
+  // ESC 關閉最上層視窗（專業終端慣例）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showBacktest) setShowBacktest(false);
+      else if (showBrowser) setShowBrowser(false);
+      else if (showData) setShowData(false);
+      else if (showSettings) { setShowSettings(false); refreshKey(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showBacktest, showBrowser, showData, showSettings]);
   useEffect(() => { api.watchlist().then(setWatchIds).catch(() => {}); }, []);
   useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
 

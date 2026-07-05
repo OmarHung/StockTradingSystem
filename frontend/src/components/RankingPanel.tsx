@@ -53,9 +53,11 @@ export function RankingPanel({ onSelect }: { onSelect: (id: string) => void }) {
                   <div style={{ fontWeight: 600 }}>{r.code}</div>
                   <div style={{ color: "var(--text-dim)", fontSize: 10 }}>{r.name}</div>
                 </td>
-                <td className={`mono ${cls(r.change_price)}`}>{fmt(r.close)}</td>
-                <td className={`mono ${cls(r.change_price)}`}>
-                  {r.change_pct > 0 ? "+" : ""}{fmt(r.change_pct)}%
+                <td className={`mono ${cls(r.change_price)}`} style={{ fontWeight: 600 }}>{fmt(r.close)}</td>
+                <td>
+                  <span className={`chg-chip ${r.change_pct === 0 ? "flat" : r.change_pct > 0 ? "up" : "down"}`}>
+                    {r.change_pct > 0 ? "+" : ""}{fmt(r.change_pct)}%
+                  </span>
                 </td>
               </tr>
             ))}

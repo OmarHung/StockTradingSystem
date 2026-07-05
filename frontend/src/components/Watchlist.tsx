@@ -40,9 +40,13 @@ export function Watchlist({
                 <div style={{ fontWeight: 600 }}>{q.stock_id}</div>
                 <div style={{ color: "var(--text-dim)", fontSize: 11 }}>{q.name}</div>
               </td>
-              <td className={`mono ${cls(q.change)}`}>{fmt(q.last)}</td>
+              <td className={`mono ${cls(q.change)}`} style={{ fontWeight: 600 }}>{fmt(q.last)}</td>
               <td className={`mono ${cls(q.change)}`}>{q.change != null && q.change > 0 ? "+" : ""}{fmt(q.change)}</td>
-              <td className={`mono ${cls(q.change)}`}>{q.change_pct != null && q.change_pct > 0 ? "+" : ""}{fmt(q.change_pct)}%</td>
+              <td>
+                <span className={`chg-chip ${q.change_pct == null || q.change_pct === 0 ? "flat" : q.change_pct > 0 ? "up" : "down"}`}>
+                  {q.change_pct != null && q.change_pct > 0 ? "+" : ""}{fmt(q.change_pct)}%
+                </span>
+              </td>
             </tr>
           ))}
           {quotes.length === 0 && <tr><td colSpan={5} className="empty-hint">尚無自選，點星星加入</td></tr>}

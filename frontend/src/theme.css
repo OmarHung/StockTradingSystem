@@ -186,3 +186,31 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .react-grid-item > .react-resizable-handle::after {
   border-right-color: var(--border-light); border-bottom-color: var(--border-light);
 }
+
+/* ---- 漲跌幅色塊（富途/TradingView 式 change chip）---- */
+.chg-chip {
+  display: inline-block; min-width: 62px; text-align: center;
+  padding: 2px 6px; border-radius: 3px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 600; color: #fff;
+}
+.chg-chip.up { background: rgba(255,67,61,0.85); }
+.chg-chip.down { background: rgba(14,203,129,0.8); }
+.chg-chip.flat { background: #2a3040; color: var(--text-dim); }
+
+/* ---- 表格數字欄一律等寬數字 ---- */
+table.grid td { font-variant-numeric: tabular-nums; }
+
+/* ---- 市場狀態徽章 ---- */
+.mkt-open { display: flex; align-items: center; gap: 5px; color: var(--up); font-size: 11px; }
+.mkt-open .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); animation: pulse 2s infinite; }
+.mkt-closed { display: flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; }
+.mkt-closed .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+
+/* ---- 細節打磨 ---- */
+.btn:active { transform: translateY(0.5px); }
+input:focus, select:focus { box-shadow: 0 0 0 2px rgba(41,98,255,0.25); }
+.panel:hover { border-color: var(--border-light); }
+.modal { box-shadow: 0 24px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(41,98,255,0.08); }
+table.grid tr { transition: background 0.06s; }
+.modal-tab:hover { color: var(--text); }

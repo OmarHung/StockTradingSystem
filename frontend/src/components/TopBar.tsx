@@ -43,7 +43,13 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
         </div>
       ))}
       <div className="spacer" />
-      <span className="live"><span className="dot" />資料連線</span>
+      {(() => {
+        const day = now.getDay(), hm = now.getHours() * 60 + now.getMinutes();
+        const open = day >= 1 && day <= 5 && hm >= 540 && hm <= 810;  // 平日 09:00–13:30
+        return open
+          ? <span className="mkt-open"><span className="dot" />盤中</span>
+          : <span className="mkt-closed"><span className="dot" />已收盤</span>;
+      })()}
       <span className="badge" style={hasKey ? {} : { background: "#3a2a1a", color: "#f0b90b", borderColor: "#5a3a1a" }}>
         {hasKey === null ? "…" : hasKey ? "AI 已啟用" : "AI 未設 Key"}
       </span>

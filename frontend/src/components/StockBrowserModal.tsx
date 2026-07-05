@@ -196,8 +196,12 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     <td><b>{r.stock_id}</b></td>
                     <td>{r.name}</td>
                     <td className="mono" style={{ textAlign: "right" }}>{r.close != null ? fmt(r.close) : "—"}</td>
-                    <td className={`mono ${r.change_pct != null ? cls(r.change_pct) : ""}`} style={{ textAlign: "right" }}>
-                      {r.change_pct != null ? `${r.change_pct > 0 ? "+" : ""}${fmt(r.change_pct)}%` : "—"}
+                    <td style={{ textAlign: "right" }}>
+                      {r.change_pct != null
+                        ? <span className={`chg-chip ${r.change_pct === 0 ? "flat" : r.change_pct > 0 ? "up" : "down"}`}>
+                            {r.change_pct > 0 ? "+" : ""}{fmt(r.change_pct)}%
+                          </span>
+                        : <span style={{ color: "var(--text-dim)" }}>—</span>}
                     </td>
                     <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.open != null ? fmt(r.open) : "—"}</td>
                     <td className="mono" style={{ textAlign: "right", fontSize: 11, color: "var(--text-dim)" }}>{r.high != null ? fmt(r.high) : "—"}</td>

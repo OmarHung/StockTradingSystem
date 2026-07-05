@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  createChart, CandlestickSeries, HistogramSeries, ColorType,
-  type IChartApi, type Time,
+  createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
+  type IChartApi, type Time, type MouseEventParams,
 } from "lightweight-charts";
 import { api } from "../api";
 import { Panel, StarButton } from "./Panel";
@@ -12,7 +12,28 @@ const TFS = [
   { v: "M", label: "月" },
 ];
 
-/** K 線圖（lightweight-charts v5）。台股紅漲綠跌；還原/原始價切換；日/週/月切換。 */
+// 均線設定（TradingView 慣例配色）
+const MAS = [
+  { n: 5, color: "#f0b90b" },
+  { n: 20, color: "#ff7043" },
+  { n: 60, color: "#26c6da" },
+];
+
+type Bar = { time: string; open: number; high: number; low: number; close: number };
+
+function sma(candles: Bar[], n: number) {
+  const out: { time: Time; value: number }[] = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += candles[i].close;
+    if (i >= n) sum -= candles[i - n].close;
+    if (i >= n - 1) out.push({ time: candles[i].time as Time, value: sum / n });
+  }
+  return out;
+}
+
+/** K 線圖（lightweight-charts v5）。台股紅漲綠跌；MA5/20/60；
+ *  游標 OHLC 資訊列（TradingView 式）；還原/原始價與日/週/月切換。 */
 export function KChart({
   stockId, name, watched, onToggleWatch,
 }: {
@@ -22,6 +43,8 @@ export function KChart({
   const chartRef = useRef<IChartApi | null>(null);
   const [tf, setTf] = useState("D");
   const [adjusted, setAdjusted] = useState(true);
+  // 游標所在 bar 的 OHLC（無游標時顯示最新一根）
+  const [info, setInfo] = useState<{ o: number; h: number; l: number; c: number; pct: number | null } | null>(null);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -53,17 +76,54 @@ export function KChart({
     });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
+    const maSeries = MAS.map((m) => chart.addSeries(LineSeries, {
+      color: m.color, lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    }));
+
     let cancelled = false;
+    let candles: Bar[] = [];
+    const barMap = new Map<string, { bar: Bar; prevClose: number | null }>();
+
+    const setInfoFromBar = (b: Bar | undefined) => {
+      if (!b) { setInfo(null); return; }
+      const prev = barMap.get(String(b.time))?.prevClose ?? null;
+      setInfo({
+        o: b.open, h: b.high, l: b.low, c: b.close,
+        pct: prev ? (b.close / prev - 1) * 100 : null,
+      });
+    };
+
     api.price(stockId, 250, tf, adjusted).then((d) => {
       if (cancelled) return;
-      candle.setData(d.candles.map((c) => ({ ...c, time: c.time as Time })));
+      candles = d.candles as Bar[];
+      candle.setData(candles.map((c) => ({ ...c, time: c.time as Time })));
       vol.setData(d.volume.map((v) => ({ time: v.time as Time, value: v.value, color: v.color })));
+      MAS.forEach((m, i) => maSeries[i].setData(sma(candles, m.n)));
+      barMap.clear();
+      candles.forEach((c, i) => barMap.set(String(c.time),
+        { bar: c, prevClose: i > 0 ? candles[i - 1].close : null }));
+      setInfoFromBar(candles[candles.length - 1]);
       chart.timeScale().fitContent();
     });
 
-    return () => { cancelled = true; chart.remove(); chartRef.current = null; };
+    const onMove = (p: MouseEventParams) => {
+      if (!p.time) { setInfoFromBar(candles[candles.length - 1]); return; }
+      const hit = barMap.get(String(p.time));
+      setInfoFromBar(hit?.bar);
+    };
+    chart.subscribeCrosshairMove(onMove);
+
+    return () => {
+      cancelled = true;
+      chart.unsubscribeCrosshairMove(onMove);
+      chart.remove();
+      chartRef.current = null;
+    };
   }, [stockId, tf, adjusted]);
 
+  const pctCls = info?.pct == null ? "" : info.pct > 0 ? "up" : info.pct < 0 ? "down" : "flat";
   return (
     <Panel title={`K 線圖 · ${stockId}`} icon="📈" sub={`${name} · ${adjusted ? "還原價" : "原始價"}`}
       right={
@@ -84,7 +144,30 @@ export function KChart({
           </div>
         </div>
       }>
-      <div ref={ref} style={{ width: "100%", height: "100%" }} />
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        {/* 游標 OHLC 資訊列（TradingView 式，左上角浮層） */}
+        <div className="mono" style={{
+          position: "absolute", top: 6, left: 8, zIndex: 3, fontSize: 11,
+          display: "flex", gap: 10, pointerEvents: "none",
+          textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+        }}>
+          {info && (
+            <>
+              <span style={{ color: "var(--text-dim)" }}>開 <span className={pctCls || "flat"}>{info.o.toFixed(2)}</span></span>
+              <span style={{ color: "var(--text-dim)" }}>高 <span className={pctCls || "flat"}>{info.h.toFixed(2)}</span></span>
+              <span style={{ color: "var(--text-dim)" }}>低 <span className={pctCls || "flat"}>{info.l.toFixed(2)}</span></span>
+              <span style={{ color: "var(--text-dim)" }}>收 <span className={pctCls || "flat"}>{info.c.toFixed(2)}</span></span>
+              {info.pct != null && (
+                <span className={pctCls}>{info.pct > 0 ? "+" : ""}{info.pct.toFixed(2)}%</span>
+              )}
+              {MAS.map((m) => (
+                <span key={m.n} style={{ color: m.color }}>MA{m.n}</span>
+              ))}
+            </>
+          )}
+        </div>
+        <div ref={ref} style={{ width: "100%", height: "100%" }} />
+      </div>
     </Panel>
   );
 }
