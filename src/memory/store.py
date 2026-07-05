@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from functools import lru_cache
 
 from src.config import ROOT
@@ -20,10 +21,21 @@ log = get_logger(__name__)
 CHROMA_DIR = ROOT / "data" / "chroma"
 
 
+# lru_cache 未命中時不互斥——FastAPI threadpool 可能並發首次初始化，
+# ChromaDB 1.x 同路徑共用內部單例，並發建立會把半初始化的實例永久卡在
+# 其內部快取（症狀：RustBindingsAPI 無 bindings → tenant 連不上）。
+_client_lock = threading.Lock()
+
+
 @lru_cache(maxsize=1)
-def _client():
+def _locked_client():
     import chromadb
     return chromadb.PersistentClient(path=str(CHROMA_DIR))
+
+
+def _client():
+    with _client_lock:
+        return _locked_client()
 
 
 def _col(name: str):
