@@ -4,7 +4,7 @@
 
 多因子量化選股初篩，交由 LLM 分析師團隊深入分析並經驗證層防幻覺把關，由交易員 Agent 產出交易計畫，再通過確定性的 Guard 風控管線後才進入模擬執行；成果回饋至向量記憶與週反思，注入下一次決策。
 
-架構融合 [CryptoTrade](https://github.com/Xtra-Computing/CryptoTrade)（多 LLM 分析師 + 交易員 Agent + Reflection）與 [LLM_trader](https://github.com/qrak/LLM_trader)（向量記憶、輸出驗證層、Guard 風控）的設計理念。
+架構融合 [CryptoTrade](https://github.com/Xtra-Computing/CryptoTrade)（多 LLM 分析師 + 交易員 Agent + Reflection）與 [LLM_trader](https://github.com/qrak/LLM_trader)（向量記憶、輸出驗證層、Guard 風控）的設計理念；WebUI 交易終端基於 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)。
 
 ![台股智慧交易終端](docs/screenshot-terminal.png)
 
@@ -27,7 +27,7 @@
 
 ## 功能特色
 
-- **React 交易終端**：K 線圖、自選/排行、智慧選股、AI 選股報告、策略回測、持倉績效、LLM 活動監控，面板可自由佈局
+- **React 交易終端**（基於 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)）：K 線圖、自選/排行、智慧選股、AI 選股報告、策略回測、持倉績效、LLM 活動監控，面板可自由佈局
 - **三源資料層**：shioaji 為主、TWSE/TPEx 官方資料、FinMind 備援，含還原價與資料品質檢查
 - **可驗證的 AI 決策**：分析師引用的每個數字都與實際資料比對，攔截幻覺
 - **風控優先**：九道確定性風控閘門置於 LLM 之後，任何交易計畫都必須通過

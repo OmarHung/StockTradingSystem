@@ -94,7 +94,7 @@ CryptoTrade 的架構是：多個 LLM 分析師各自產出報告 → 交易員 
 | LLM | Claude API（分析師用 Sonnet、交易員/反思用進階模型），失敗自動 fallback | 結構化輸出 JSON |
 | 向量記憶 | ChromaDB（本地） | 交易經驗/語意規則/被擋交易 三個 collection |
 | 回測 | 自建 TWEnv（gym 式介面） | 事件驅動日線回測，含台股成本模型 |
-| WebUI | React 19 + Vite + lightweight-charts / FastAPI 後端 | 專業交易終端；所有 CLI 操作皆可在 WebUI 執行，長任務走 jobs 背景機制 |
+| WebUI | React 19 + Vite + lightweight-charts / FastAPI 後端，基於 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app) | 專業交易終端；所有 CLI 操作皆可在 WebUI 執行，長任務走 jobs 背景機制 |
 | 排程 | 後端內建排程器（asyncio） | 實際工作走獨立子行程，API 重啟不中斷；晚啟動當天自動補跑；WebUI 可監控與調整 |
 | 通知 | Telegram Bot | 每日決策報告推播（未設定金鑰則自動跳過，失敗不影響交易） |
 
