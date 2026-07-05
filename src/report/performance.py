@@ -65,4 +65,16 @@ def performance_summary() -> dict:
         out["taiex_curve"] = [
             {"time": r.date, "value": round(base * float(r.taiex_close) / t0, 0)}
             for r in taiex.itertuples()]
-    return out
+    return _sanitize(out)
+
+
+def _sanitize(obj):
+    """NaN/Inf → None（JSON 不合法；如 sortino 在無負報酬日時下檔標準差=0 → NaN）。"""
+    import math
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
