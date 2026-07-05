@@ -18,7 +18,10 @@ def test_name_matches_loose():
     assert _name_matches("台積電", "台積電")
     assert _name_matches("貿聯-KY", "貿聯")            # -KY 尾綴
     assert _name_matches("", "任何名稱")               # 池內無名稱 → 無從比對，放行
+    assert _name_matches("士電", "士林電機")           # 跳字簡稱（子序列）
+    assert _name_matches("中鋼", "中國鋼鐵")
     assert not _name_matches("益張", "日友環保")       # 幻覺代號掛錯名
+    assert not _name_matches("士電", "台達電")         # 子序列不成立（士不在其中）
 
 
 @pytest.fixture

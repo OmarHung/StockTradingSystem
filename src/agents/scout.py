@@ -205,17 +205,27 @@ _NAME_NOISE_PAT = re.compile(r"股份有限公司|控股|-KY|\*|\s")
 _PAIR_PAT = re.compile(r"([\u4e00-\u9fffA-Za-z*\-]{2,10})[（(](\d{4})[）)]")
 
 
+def _is_subsequence(short: str, long: str) -> bool:
+    """short 的每個字依序出現在 long 中（可跳字）。"""
+    it = iter(long)
+    return all(ch in it for ch in short)
+
+
 def _name_matches(db_name: str, llm_name: str) -> bool:
-    """寬鬆比對 LLM 名稱與股票池名稱：去尾綴後互相包含即視為一致。
+    """寬鬆比對 LLM 名稱與股票池名稱：去尾綴後互相包含、或短名為長名的子序列即一致。
 
     LLM 常回全名（漢翔航空工業）而資料庫存簡稱（漢翔），故用包含而非相等；
-    任一方為空時視為一致（無從比對，交給後續分析師層把關）。
+    台股簡稱也常從全名跳字縮寫（士林電機→士電、中國鋼鐵→中鋼），
+    故再放寬到子序列。任一方為空時視為一致（無從比對，交給後續分析師層把關）。
     """
     a = _NAME_NOISE_PAT.sub("", db_name or "")
     b = _NAME_NOISE_PAT.sub("", llm_name or "")
     if not a or not b:
         return True
-    return a in b or b in a
+    if a in b or b in a:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 2 and _is_subsequence(short, long)
 
 
 def _pair_conflict(text: str, info: dict) -> str | None:
