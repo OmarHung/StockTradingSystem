@@ -195,7 +195,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button className="btn" style={{ borderColor: "var(--up)", color: "var(--up)" }}
+                <button className="btn" style={{ borderColor: "var(--up)", color: "var(--up)", whiteSpace: "nowrap", flexShrink: 0 }}
                   onClick={async () => {
                     if (!window.confirm(
                       "⚠️ 將清除所有 AI 產出資料：\n\n" +
