@@ -295,6 +295,23 @@ def friction(limit: int = 100):
     return _records(df)
 
 
+@app.post("/api/ai-data/clear")
+def clear_ai_data():
+    """清除所有 AI 產出：分析記錄、交易計畫、Guard 駁回、反思記憶。
+
+    不動行情資料（股價/法人/營收等）、模擬交易帳本（positions/orders/fills），
+    也不動智慧選股快照（screener_result 是純量化排名，非 LLM 產出，可隨時重算）。
+    """
+    tables = ("brain_log", "trade_plan", "friction_log")
+    deleted: dict = {}
+    with db.connect(get_settings().db_path) as conn:
+        for t in tables:
+            deleted[t] = conn.execute(f"DELETE FROM {t}").rowcount
+    from src.memory import store as memory_store
+    deleted["memory"] = memory_store.clear_all()
+    return {"status": "cleared", "deleted": deleted}
+
+
 # ---------- Phase 5：模擬交易（持倉/績效/每日流程/緊急停止） ----------
 _DAILY_JOB = "daily"
 

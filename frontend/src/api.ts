@@ -113,6 +113,7 @@ export const api = {
     put<{ status: string }>("/config", { section, values }),
   envStatus: () => get<{ finmind_token: boolean; anthropic_key: boolean; shioaji_key: boolean }>("/env-status"),
   setEnv: (key: string, value: string) => post<{ status: string }>("/set-env", { key, value }),
+  clearAiData: () => post<{ status: string; deleted: Record<string, any> }>("/ai-data/clear", {}),
   // Phase 5：模擬交易
   portfolio: () => get<Record<string, any>>("/portfolio"),
   portfolioReset: () => post<{ status: string; cash: number }>("/portfolio/reset", {}),

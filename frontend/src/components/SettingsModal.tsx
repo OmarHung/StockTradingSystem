@@ -165,6 +165,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               清單為 Claude 最新前 5 個模型（即時查詢）。⚡ 表示支援思考模式；ctx 為上下文上限、out 為輸出上限。
               交易員/反思建議選支援思考的模型；不支援思考者系統會自動關閉思考參數。
             </div>
+
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button className="btn" style={{ borderColor: "var(--up)", color: "var(--up)" }}
+                  onClick={async () => {
+                    if (!window.confirm(
+                      "⚠️ 將清除所有 AI 產出資料：\n\n" +
+                      "・大腦活動（LLM 呼叫記錄）\n・交易計畫（AI 選股報告）\n" +
+                      "・Guard 風控駁回記錄\n・反思記憶庫（經驗/規則）\n\n" +
+                      "行情資料、智慧選股排名與模擬交易帳本不受影響。此操作無法復原，確定嗎？")) return;
+                    try {
+                      const r = await api.clearAiData();
+                      const d = r.deleted;
+                      flash(`已清除 ✓（大腦 ${d.brain_log}、計畫 ${d.trade_plan} 筆）`);
+                    } catch (e) { alert(String(e)); }
+                  }}>🗑️ 清除 AI 資料</button>
+                <div className="form-hint" style={{ margin: 0 }}>
+                  清空分析記錄、交易計畫與反思記憶，從乾淨狀態重新累積。不動行情資料、智慧選股與交易帳本。
+                </div>
+              </div>
+            </div>
           </>)}
 
           {tab === "sched" && <SchedulerTab />}

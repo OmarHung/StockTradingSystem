@@ -10,6 +10,7 @@ import json
 from src.agents import analysts, trader, validator
 from src.config import get_settings
 from src.data import database as db
+from src.llm import client as llm
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -17,6 +18,7 @@ log = get_logger(__name__)
 
 def analyze_stock(stock_id: str, as_of: str) -> dict | None:
     """跑完整決策流程，回傳並存檔一份交易計畫（含各分析師報告與驗證結果）。"""
+    llm.new_run()  # 本次管線的所有 LLM 呼叫/攔截共用一個 run_id（大腦活動分組）
     bundle: dict = {}
     tech_feats: dict = {}
 

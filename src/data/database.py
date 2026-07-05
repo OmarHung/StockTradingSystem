@@ -148,7 +148,8 @@ SCHEMA: dict[str, str] = {
             model      TEXT,               -- 實際使用模型（含 fallback 後）
             prompt     TEXT,               -- 送出的 user prompt
             response   TEXT,               -- 原始回應（JSON 字串）
-            note       TEXT                -- 驗證層攔截等備註
+            note       TEXT,               -- 驗證層攔截等備註
+            run_id     TEXT                -- 同一次決策管線的批次識別（分組用）
         )
     """,
     # 交易計畫（交易員 Agent 產出，供選股報告與後續執行）
@@ -282,6 +283,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for col, ddl in (("outcome", "TEXT"), ("outcome_return", "REAL"), ("evaluated_at", "TEXT")):
             if col not in cols:
                 conn.execute(f"ALTER TABLE trade_plan ADD COLUMN {col} {ddl}")
+    # 大腦活動分組：brain_log 批次識別
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(brain_log)").fetchall()]
+    if cols and "run_id" not in cols:
+        conn.execute("ALTER TABLE brain_log ADD COLUMN run_id TEXT")
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:

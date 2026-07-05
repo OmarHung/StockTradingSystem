@@ -122,3 +122,15 @@ def count_all() -> dict:
         "rules": _col("rules").count(),
         "blocked": _col("blocked").count(),
     }
+
+
+def clear_all() -> dict:
+    """清空三個 collection（反思記憶重置）。回傳清除前的筆數。"""
+    counts = count_all()
+    client = _client()
+    for name in ("experiences", "rules", "blocked"):
+        try:
+            client.delete_collection(name)
+        except Exception:  # noqa: BLE001 — collection 不存在時略過
+            pass
+    return counts

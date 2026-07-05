@@ -518,7 +518,7 @@ def stock_series(stock_id: str) -> dict:
 
 def brain_log(limit: int = 100, as_of: str | None = None) -> pd.DataFrame:
     """讀取最近的 LLM 呼叫/驗證記錄（供大腦活動頁）。"""
-    sql = "SELECT id, ts, as_of, stock_id, agent, model, prompt, response, note FROM brain_log"
+    sql = "SELECT id, ts, as_of, stock_id, agent, model, prompt, response, note, run_id FROM brain_log"
     params: tuple = ()
     if as_of:
         sql += " WHERE as_of=?"

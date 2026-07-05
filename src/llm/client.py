@@ -7,9 +7,11 @@
 """
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import json
 import os
+import uuid
 
 import anthropic
 from pydantic import BaseModel
@@ -27,6 +29,18 @@ FALLBACK_CHAIN = ["claude-sonnet-4-6", "claude-haiku-4-5"]
 
 class LLMUnavailable(RuntimeError):
     """未設定 API key 或所有模型都失敗。"""
+
+
+# 當前決策管線批次 ID：pipeline 開跑時 new_run()，其間所有 LLM 呼叫/攔截
+# 記錄都帶同一 run_id，供「大腦活動」把一次分析的多個 Agent 分成同一組。
+_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("brain_run_id", default=None)
+
+
+def new_run() -> str:
+    """開始一個新的決策管線批次，回傳批次 ID。"""
+    rid = uuid.uuid4().hex[:12]
+    _run_id.set(rid)
+    return rid
 
 
 def has_api_key() -> bool:
@@ -105,10 +119,10 @@ def _log_call(agent, model, prompt, response, stock_id, as_of) -> None:
     try:
         with db.connect(get_settings().db_path) as conn:
             conn.execute(
-                "INSERT INTO brain_log (ts, as_of, stock_id, agent, model, prompt, response) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO brain_log (ts, as_of, stock_id, agent, model, prompt, response, run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (dt.datetime.now().isoformat(timespec="seconds"), as_of, stock_id,
-                 agent, model, prompt, response),
+                 agent, model, prompt, response, _run_id.get()),
             )
     except Exception as e:  # noqa: BLE001 — 記錄失敗不應中斷主流程
         log.error("brain_log 寫入失敗：%s", e)
@@ -119,8 +133,10 @@ def log_note(agent: str, note: str, stock_id: str | None = None, as_of: str | No
     try:
         with db.connect(get_settings().db_path) as conn:
             conn.execute(
-                "INSERT INTO brain_log (ts, as_of, stock_id, agent, note) VALUES (?, ?, ?, ?, ?)",
-                (dt.datetime.now().isoformat(timespec="seconds"), as_of, stock_id, agent, note),
+                "INSERT INTO brain_log (ts, as_of, stock_id, agent, note, run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (dt.datetime.now().isoformat(timespec="seconds"), as_of, stock_id,
+                 agent, note, _run_id.get()),
             )
     except Exception as e:  # noqa: BLE001
         log.error("brain_log note 寫入失敗：%s", e)
