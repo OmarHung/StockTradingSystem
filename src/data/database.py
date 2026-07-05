@@ -78,6 +78,13 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, revenue_year, revenue_month)
         )
     """,
+    # WebUI 介面狀態（面板佈局等；跨瀏覽器/裝置一致）
+    "ui_state": """
+        CREATE TABLE IF NOT EXISTS ui_state (
+            key   TEXT PRIMARY KEY,
+            value TEXT                   -- JSON 字串
+        )
+    """,
     # 每日估值指標（TWSE BWIBBU_d / TPEx peQryDate，官方按日全市場）
     "valuation": """
         CREATE TABLE IF NOT EXISTS valuation (

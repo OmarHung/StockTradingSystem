@@ -125,6 +125,33 @@ def stock_events(stock_id: str):
     return {"dividends": div, "capital_changes": cap}
 
 
+# ---------- WebUI 介面狀態（面板佈局，存 DB → 跨瀏覽器一致）----------
+class UiLayoutReq(BaseModel):
+    layout: list
+
+
+@app.get("/api/ui/layout")
+def ui_layout_get():
+    with db.connect(get_settings().db_path) as conn:
+        row = conn.execute("SELECT value FROM ui_state WHERE key='layout'").fetchone()
+    return {"layout": json.loads(row[0]) if row else None}
+
+
+@app.put("/api/ui/layout")
+def ui_layout_save(req: UiLayoutReq):
+    with db.connect(get_settings().db_path) as conn:
+        conn.execute("INSERT OR REPLACE INTO ui_state (key, value) VALUES ('layout', ?)",
+                     (json.dumps(req.layout),))
+    return {"saved": True}
+
+
+@app.delete("/api/ui/layout")
+def ui_layout_reset():
+    with db.connect(get_settings().db_path) as conn:
+        conn.execute("DELETE FROM ui_state WHERE key='layout'")
+    return {"reset": True}
+
+
 # ---------- 行情 ----------
 @app.get("/api/price/{stock_id}")
 def price(stock_id: str, start: str | None = None, end: str | None = None,

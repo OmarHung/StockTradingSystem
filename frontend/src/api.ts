@@ -82,6 +82,9 @@ export const api = {
     dividends: { date: string; kind: string; amount: number | null }[];
     capital_changes: { date: string; kind: string; before: number; after: number }[];
   }>(`/stocks/${id}/events`),
+  uiLayoutGet: () => get<{ layout: any[] | null }>("/ui/layout"),
+  uiLayoutSave: (layout: any[]) => put<{ saved: boolean }>("/ui/layout", { layout }),
+  uiLayoutReset: () => del<{ reset: boolean }>("/ui/layout"),
   schedulerStatus: () => get<Record<string, any>[]>("/scheduler/status"),
   schedulerConfig: (name: string, enabled: boolean, time: string) =>
     post<{ saved: boolean }>("/scheduler/config", { name, enabled, time }),

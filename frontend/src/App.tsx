@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import GridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -20,8 +20,7 @@ import { MemoryPanel } from "./components/MemoryPanel";
 import { PortfolioPanel } from "./components/PortfolioPanel";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
-// 調整結果存 localStorage（LS_LAYOUT_KEY），重新整理不會跑掉；TopBar ↺ 可重置。
-const LS_LAYOUT_KEY = "sts.layout.v1";
+// 調整結果存後端 DB（ui_state 表）——跨瀏覽器/裝置一致；TopBar ↺ 可重置。
 const LAYOUT: Layout = [
   { i: "watchlist", x: 0, y: 0, w: 2, h: 7, minW: 2 },
   { i: "ranking", x: 0, y: 7, w: 2, h: 5, minW: 2 },
@@ -43,19 +42,28 @@ export default function App() {
   const [showBrowser, setShowBrowser] = useState(false);
   const [showBacktest, setShowBacktest] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
-  const [layout, setLayout] = useState<Layout>(() => {
-    try {
-      const saved = localStorage.getItem(LS_LAYOUT_KEY);
+  const [layout, setLayout] = useState<Layout>(LAYOUT);
+  const layoutLoaded = useRef(false);
+  const saveTimer = useRef<number | null>(null);
+  useEffect(() => {
+    api.uiLayoutGet().then(({ layout: saved }) => {
       if (saved) {
-        const parsed = JSON.parse(saved) as Layout;
         // 面板組成有變（新增/移除面板）→ 佈局過期，回預設
-        const keys = new Set(parsed.map((l) => l.i));
-        if (LAYOUT.every((l) => keys.has(l.i)) && parsed.length === LAYOUT.length) return parsed;
+        const keys = new Set(saved.map((l: any) => l.i));
+        if (LAYOUT.every((l) => keys.has(l.i)) && saved.length === LAYOUT.length) {
+          setLayout(saved as Layout);
+        }
       }
-    } catch { /* 壞資料回預設 */ }
-    return LAYOUT;
-  });
-  const resetLayout = () => { localStorage.removeItem(LS_LAYOUT_KEY); setLayout([...LAYOUT]); };
+      layoutLoaded.current = true;
+    }).catch(() => { layoutLoaded.current = true; });
+  }, []);
+  const persistLayout = (l: Layout) => {
+    setLayout(l);
+    if (!layoutLoaded.current) return;          // 初始載入期間不回寫
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => api.uiLayoutSave(l).catch(() => {}), 500);
+  };
+  const resetLayout = () => { api.uiLayoutReset().catch(() => {}); setLayout([...LAYOUT]); };
 
   const { width, containerRef } = useContainerWidth();
 
@@ -105,10 +113,7 @@ export default function App() {
         <GridLayout
           className="layout"
           layout={layout}
-          onLayoutChange={(l: Layout) => {
-            setLayout(l);
-            localStorage.setItem(LS_LAYOUT_KEY, JSON.stringify(l));
-          }}
+          onLayoutChange={persistLayout}
           width={width || 1400}
           gridConfig={{ cols: 12, rowHeight: 48, margin: [8, 8] }}
           dragConfig={{ handle: ".panel-drag-handle" }}
