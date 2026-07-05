@@ -1,6 +1,6 @@
 import { FlaskConical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries, ColorType, type IChartApi, type Time } from "lightweight-charts";
+import { createChart, createSeriesMarkers, LineSeries, ColorType, type IChartApi, type Time, type SeriesMarker } from "lightweight-charts";
 import { api, type BacktestResult } from "../api";
 import { fmt } from "./Panel";
 
@@ -67,6 +67,34 @@ function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
     chartRef.current = chart;
     const line = chart.addSeries(LineSeries, { color: "#2962ff", lineWidth: 2 });
     line.setData(res.equity_curve.map((p) => ({ time: p.time as Time, value: p.value })));
+
+    // 買賣標記：同日同方向聚合（紅↑買 / 綠↓賣，台股慣例配色）
+    const curveDates = new Set(res.equity_curve.map((p) => String(p.time)));
+    const grouped = new Map<string, { buys: string[]; sells: string[] }>();
+    for (const tr of res.trades ?? []) {
+      const d = String(tr.date);
+      if (!curveDates.has(d)) continue;
+      const g = grouped.get(d) ?? { buys: [], sells: [] };
+      (tr.side === "BUY" ? g.buys : g.sells).push(String(tr.stock_id));
+      grouped.set(d, g);
+    }
+    const label = (codes: string[]) => codes.length <= 2 ? codes.join(",") : `${codes.length}檔`;
+    const markers: SeriesMarker<Time>[] = [];
+    for (const [d, g] of grouped) {
+      if (g.buys.length) markers.push({
+        time: d as Time, position: "belowBar", shape: "arrowUp",
+        color: "#ff433d", size: 1, text: `買 ${label(g.buys)}`,
+      });
+      if (g.sells.length) markers.push({
+        time: d as Time, position: "aboveBar", shape: "arrowDown",
+        color: "#0ecb81", size: 1, text: `賣 ${label(g.sells)}`,
+      });
+    }
+    if (markers.length) {
+      markers.sort((a, b) => (String(a.time) < String(b.time) ? -1 : 1));
+      createSeriesMarkers(line, markers);
+    }
+
     chart.timeScale().fitContent();
     return () => { chart.remove(); chartRef.current = null; };
   }, [res]);
