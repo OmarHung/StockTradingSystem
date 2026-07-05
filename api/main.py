@@ -351,25 +351,109 @@ class AnalyzeReq(BaseModel):
     top_n: int = 3
 
 
-@app.post("/api/analyze")
-def analyze(req: AnalyzeReq):
-    if not llm.has_api_key():
-        raise HTTPException(400, "未設定 ANTHROPIC_API_KEY")
-    ranked = run_screener(req.as_of)
+def _gather_picks(as_of: str, top_n: int, progress=None) -> tuple[list[str], dict[str, str]]:
+    """收集選股報告候選：量化 top_n + 政策題材偵察額外名額。回傳 (picks, sources)。"""
+    if progress:
+        progress("載入量化候選…")
+    ranked = run_screener(as_of)
     if ranked.empty:
-        return []
-    picks = ranked["stock_id"].head(req.top_n).tolist()
+        return [], {}
+    picks = ranked["stock_id"].head(top_n).tolist()
     # 政策題材偵察：額外名額（不佔量化 top_n；失敗不影響量化候選）
     sources = {sid: "screener" for sid in picks}
+    if progress:
+        progress("政策題材偵察…")
     try:
         from src.agents import scout as news_scout
-        for c in news_scout.run_news_scout(req.as_of):
+        for c in news_scout.run_news_scout(as_of):
             if c["stock_id"] not in picks:
                 picks.append(c["stock_id"])
                 sources[c["stock_id"]] = "news_scout"
     except Exception as e:  # noqa: BLE001
         log.error("政策題材偵察失敗：%s", e)
+    return picks, sources
+
+
+@app.post("/api/analyze")
+def analyze(req: AnalyzeReq):
+    if not llm.has_api_key():
+        raise HTTPException(400, "未設定 ANTHROPIC_API_KEY")
+    picks, sources = _gather_picks(req.as_of, req.top_n)
+    if not picks:
+        return []
     return pipeline.analyze_stocks(picks, req.as_of, sources=sources)
+
+
+# 背景選股報告（供 WebUI 實時進度）：start 啟動執行緒，status 輪詢階段/逐檔進度，
+# cancel 設旗標於下一檔前中止並移除本次已寫入的交易計畫
+_ana_lock = threading.Lock()
+_ana_cancel = threading.Event()
+_ana_state: dict = {"running": False, "as_of": None, "stage": "", "current": 0,
+                    "total": 0, "error": None}
+
+
+def _cleanup_analyze_run(as_of: str, stock_ids: list[str]) -> None:
+    """中斷選股報告：移除本次已寫入的交易計畫與對應風控駁回紀錄（不動行情/帳本/題材快照）。"""
+    if not stock_ids:
+        return
+    ph = ",".join("?" * len(stock_ids))
+    with db.connect(get_settings().db_path) as conn:
+        conn.execute(f"DELETE FROM trade_plan WHERE as_of=? AND stock_id IN ({ph})",
+                     (as_of, *stock_ids))
+        conn.execute(f"DELETE FROM friction_log WHERE as_of=? AND stock_id IN ({ph})",
+                     (as_of, *stock_ids))
+    log.info("已中斷選股報告並移除 %d 檔本次計畫（%s）", len(stock_ids), as_of)
+
+
+@app.post("/api/analyze/start")
+def analyze_start(req: AnalyzeReq):
+    if not llm.has_api_key():
+        raise HTTPException(400, "未設定 ANTHROPIC_API_KEY")
+    with _ana_lock:
+        if _ana_state["running"]:
+            return {"started": False, "running": True}
+        _ana_cancel.clear()
+        _ana_state.update(running=True, as_of=req.as_of, stage="準備中",
+                          current=0, total=0, error=None)
+
+    def _work():
+        try:
+            def prog(stage: str, cur: int = 0, tot: int = 0) -> None:
+                _ana_state.update(stage=stage, current=cur, total=tot)
+            picks, sources = _gather_picks(req.as_of, req.top_n, progress=prog)
+            records = []
+            if picks and not _ana_cancel.is_set():
+                records = pipeline.analyze_stocks(
+                    picks, req.as_of, sources=sources, progress=prog,
+                    should_cancel=_ana_cancel.is_set)
+            if _ana_cancel.is_set():
+                _cleanup_analyze_run(req.as_of, [r["stock_id"] for r in records])
+                _ana_state.update(stage="已中斷", current=0, total=0)
+            else:
+                _ana_state.update(stage="完成", current=0, total=0)
+        except Exception as e:  # noqa: BLE001 — 錯誤放進 status 讓前端顯示
+            log.error("背景選股報告失敗：%s", e)
+            _ana_state["error"] = str(e)
+        finally:
+            _ana_state["running"] = False
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"started": True, "running": True}
+
+
+@app.get("/api/analyze/status")
+def analyze_status():
+    return dict(_ana_state)
+
+
+@app.post("/api/analyze/cancel")
+def analyze_cancel():
+    """請求中斷進行中的選股報告；實際中止與資料清理在背景工作於下一檔前完成。"""
+    if not _ana_state["running"]:
+        return {"cancelled": False, "running": False}
+    _ana_cancel.set()
+    _ana_state.update(stage="中斷中…")
+    return {"cancelled": True, "running": True}
 
 
 @app.get("/api/news")
@@ -452,12 +536,12 @@ def friction(limit: int = 100):
 
 @app.post("/api/ai-data/clear")
 def clear_ai_data():
-    """清除所有 AI 產出：分析記錄、交易計畫、Guard 駁回、反思記憶。
+    """清除所有 AI 產出：分析記錄、交易計畫、Guard 駁回、題材偵察快照、反思記憶。
 
-    不動行情資料（股價/法人/營收等）、模擬交易帳本（positions/orders/fills），
+    不動行情資料（股價/法人/營收/個股新聞原文等）、模擬交易帳本（positions/orders/fills），
     也不動量化選股快照（screener_result 是純量化排名，非 LLM 產出，可隨時重算）。
     """
-    tables = ("brain_log", "trade_plan", "friction_log")
+    tables = ("brain_log", "trade_plan", "friction_log", "scout_log")
     deleted: dict = {}
     with db.connect(get_settings().db_path) as conn:
         for t in tables:

@@ -190,8 +190,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     if (!window.confirm(
                       "⚠️ 將清除所有 AI 產出資料：\n\n" +
                       "・大腦活動（LLM 呼叫記錄）\n・交易計畫（AI 選股報告）\n" +
-                      "・Guard 風控駁回記錄\n・反思記憶庫（經驗/規則）\n\n" +
-                      "行情資料、量化選股排名與模擬交易帳本不受影響。此操作無法復原，確定嗎？")) return;
+                      "・Guard 風控駁回記錄\n・政策題材偵察快照\n・反思記憶庫（經驗/規則）\n\n" +
+                      "行情資料、個股新聞原文、量化選股排名與模擬交易帳本不受影響。此操作無法復原，確定嗎？")) return;
                     try {
                       const r = await api.clearAiData();
                       const d = r.deleted;

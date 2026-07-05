@@ -12,6 +12,19 @@ const AGENT_LABEL: Record<string, string> = {
   scout: "題材偵察", trader: "交易員",
 };
 
+/** 攔截 = 驗證層寫的備註（agent 為 validator:xxx）；其他備註（如偵察候選）只是資訊。 */
+function isIntercept(r: Record<string, any>): boolean {
+  return !!r.note && String(r.agent || "").startsWith("validator");
+}
+/** agent 顯示名：validator:news → 驗證層·新聞面。 */
+function labelOf(agent: string): string {
+  if (agent?.startsWith("validator:")) {
+    const inner = agent.slice("validator:".length);
+    return `驗證層·${AGENT_LABEL[inner] || inner}`;
+  }
+  return AGENT_LABEL[agent] || agent;
+}
+
 /** 從 "YYYY-MM-DD HH:MM:SS" 取出 HH:MM，取不到就原樣返回。 */
 function timeOf(ts: string): string {
   const m = /(\d{2}:\d{2})(:\d{2})?$/.exec(ts || "");
@@ -102,10 +115,17 @@ function BrainDetailModal({ group, title, onClose }: {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {run.map((r) => r.note ? (
-                      <div key={r.id} style={{ fontSize: 11, color: "var(--warning)", background: "rgba(240,185,11,0.08)",
-                        padding: "6px 8px", borderRadius: 4, borderLeft: "2px solid var(--warning)" }}>
-                        🛡️ {timeOf(r.ts)}　{AGENT_LABEL[r.agent] || r.agent}　{r.note}
-                      </div>
+                      isIntercept(r) ? (
+                        <div key={r.id} style={{ fontSize: 11, color: "var(--warning)", background: "rgba(240,185,11,0.08)",
+                          padding: "6px 8px", borderRadius: 4, borderLeft: "2px solid var(--warning)" }}>
+                          🛡️ {timeOf(r.ts)}　{labelOf(r.agent)}　{r.note}
+                        </div>
+                      ) : (
+                        <div key={r.id} style={{ fontSize: 11, color: "var(--text-dim)", background: "#0d1119",
+                          padding: "6px 8px", borderRadius: 4, borderLeft: "2px solid var(--accent-dim, #2962ff)" }}>
+                          {ICON[r.agent] || "📝"} {timeOf(r.ts)}　<b style={{ color: "var(--text)" }}>{labelOf(r.agent)}</b>　{r.note}
+                        </div>
+                      )
                     ) : (
                       <details key={r.id} style={{ fontSize: 11, background: "#0d1119", borderRadius: 4, padding: "5px 8px" }}>
                         <summary style={{ cursor: "pointer", color: "var(--text-dim)" }}>
@@ -163,7 +183,7 @@ export function BrainPanel() {
       g.rows.push(r);
       g.end = r.ts;
       if (r.agent && !g.agents.includes(r.agent)) g.agents.push(r.agent);
-      if (r.note) g.flags++;
+      if (isIntercept(r)) g.flags++;
     }
     // 依最後活動時間新到舊排序，最近分析的股票排最上面
     return [...map.values()].sort((a, b) => (a.end < b.end ? 1 : -1));

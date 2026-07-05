@@ -115,6 +115,12 @@ export const api = {
     get<{ running: boolean; log: string; result: BacktestResult | null }>("/backtest/status"),
   analyze: (asOf: string, topN: number) =>
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
+  analyzeStart: (asOf: string, topN: number) =>
+    post<{ started: boolean; running: boolean }>("/analyze/start", { as_of: asOf, top_n: topN }),
+  analyzeStatus: () =>
+    get<{ running: boolean; as_of: string | null; stage: string; current: number; total: number; error: string | null }>("/analyze/status"),
+  analyzeCancel: () =>
+    post<{ cancelled: boolean; running: boolean }>("/analyze/cancel", {}),
   newsAll: (q = "", stockId = "", limit = 300) =>
     get<Record<string, any>[]>(`/news?limit=${limit}&q_kw=${encodeURIComponent(q)}&stock_id=${encodeURIComponent(stockId)}`),
   scoutDates: () => get<{ as_of: string; source: string; headlines: number; candidates: number }[]>("/scout/dates"),

@@ -19,6 +19,8 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   const [open, setOpen] = useState<Record<string, boolean>>({});   // 卡片展開狀態（預設收闔）
   const [scout, setScout] = useState<Awaited<ReturnType<typeof api.scout>>>(null);
   const [scoutOpen, setScoutOpen] = useState(false);               // 偵察區塊展開（含新聞標題清單）
+  const [prog, setProg] = useState<{ stage: string; current: number; total: number } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   // 股名對照表（一次載入；歷史報告也吃得到）
   useEffect(() => {
@@ -44,14 +46,34 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
     api.scout(asOf).then(setScout).catch(() => setScout(null));
   }, [asOf]);
 
+  // 背景執行 + 輪詢進度：階段文字（載入候選/題材偵察/逐檔分析子階段）＋逐檔計數實時更新，
+  // 完成後載回該日已存交易計畫（重複執行不疊跑）
   const run = async () => {
     setLoading(true);
+    setProg({ stage: "啟動中…", current: 0, total: 0 });
     try {
-      setRecs(await api.analyze(asOf, topN));
-      api.scout(asOf).then(setScout).catch(() => {});
+      await api.analyzeStart(asOf, topN);   // 已在跑則直接接上輪詢
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 800));
+        const st = await api.analyzeStatus();
+        setProg({ stage: st.stage, current: st.current, total: st.total });
+        if (!st.running) {
+          if (st.error) throw new Error(st.error);
+          setRecs(await api.tradePlans(asOf));
+          api.scout(asOf).then(setScout).catch(() => {});
+          break;
+        }
+      }
     }
     catch (e) { alert(String(e)); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setProg(null); setCancelling(false); }
+  };
+
+  // 中斷：設旗標，背景工作於下一檔前停止並移除本次已寫入的計畫；輪詢迴圈隨即收尾
+  const cancel = async () => {
+    setCancelling(true);
+    try { await api.analyzeCancel(); }
+    catch (e) { alert(String(e)); setCancelling(false); }
   };
 
   return (
@@ -60,12 +82,34 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
           <input type="number" min={1} max={10} value={topN} style={{ width: 48 }}
-            onChange={(e) => setTopN(+e.target.value)} />
-          <button className="btn primary" onClick={run} disabled={loading || !hasKey || !asOf}>分析</button>
+            onChange={(e) => setTopN(+e.target.value)} disabled={loading} />
+          {loading ? (
+            <button className="btn" onClick={cancel} disabled={cancelling}>
+              {cancelling ? "中斷中…" : "中斷"}
+            </button>
+          ) : (
+            <button className="btn primary" onClick={run} disabled={!hasKey || !asOf}>分析</button>
+          )}
         </div>
       }>
       {!hasKey && <div className="empty-hint">未設定 ANTHROPIC_API_KEY，無法執行 LLM 分析。</div>}
-      {loading && <div className="spinner">分析師團隊 + 交易員決策中（每檔約 5 次 LLM 呼叫）…</div>}
+      {loading && (
+        <div style={{ padding: "18px 20px", textAlign: "center" }}>
+          <div className="spinner" style={{ marginBottom: 10 }}>
+            {prog?.stage || "分析師團隊 + 交易員決策中"}
+            {prog && prog.total > 0 ? `　第 ${prog.current} / ${prog.total} 檔` : "…"}
+          </div>
+          {prog && prog.total > 0 && (
+            <div style={{ height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden", maxWidth: 360, margin: "0 auto" }}>
+              <div style={{
+                height: "100%", background: "#2962ff", borderRadius: 2,
+                width: `${Math.min(100, (prog.current / prog.total) * 100)}%`,
+                transition: "width .4s",
+              }} />
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
         {/* 🛰️ 政策題材偵察快照：當日掃到的新聞與候選（點標題展開新聞清單） */}
         {scout && (

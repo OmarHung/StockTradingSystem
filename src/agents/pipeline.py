@@ -16,17 +16,21 @@ from src.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict | None:
+def analyze_stock(stock_id: str, as_of: str, source: str = "screener",
+                  on_step=None) -> dict | None:
     """跑完整決策流程，回傳並存檔一份交易計畫（含各分析師報告與驗證結果）。
 
     source：候選來源（screener=量化初篩 / news_scout=政策題材偵察），供報告標示。
+    on_step：可選子階段回呼 on_step(label)，供 WebUI 顯示目前跑到哪個分析師/交易員。
     """
+    step = on_step or (lambda _label: None)
     llm.new_run()  # 本次管線的所有 LLM 呼叫/攔截共用一個 run_id（大腦活動分組）
     bundle: dict = {}
     tech_feats: dict = {}
 
     # 1) 技術面
     try:
+        step("技術面")
         rpt, tech_feats = analysts.run_technical(stock_id, as_of)
         if rpt:
             ok, flags, conf = validator.validate_technical(rpt, tech_feats, stock_id, as_of)
@@ -36,6 +40,7 @@ def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict |
 
     # 2) 籌碼面
     try:
+        step("籌碼面")
         rpt, feats = analysts.run_chips(stock_id, as_of)
         if rpt:
             ok, flags, conf = validator.validate_chips(rpt, feats, stock_id, as_of)
@@ -45,6 +50,7 @@ def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict |
 
     # 3) 基本面
     try:
+        step("基本面")
         rpt, feats = analysts.run_fundamental(stock_id, as_of)
         if rpt:
             ok, flags, conf = validator.validate_fundamental(rpt, feats, stock_id, as_of)
@@ -54,6 +60,7 @@ def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict |
 
     # 4) 新聞面（按需抓取；冷門股無新聞或額度用罄時自動缺席，不影響其他分析師）
     try:
+        step("新聞面")
         rpt, feats = analysts.run_news(stock_id, as_of)
         if rpt:
             ok, flags, conf = validator.validate_news(rpt, feats, stock_id, as_of)
@@ -66,6 +73,7 @@ def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict |
         return None
 
     # 5) 交易員綜合決策
+    step("交易員決策")
     plan = trader.run_trader(stock_id, as_of, bundle, tech_feats)
 
     record = {
@@ -138,11 +146,25 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
 
 
 def analyze_stocks(stock_ids: list[str], as_of: str,
-                   sources: dict[str, str] | None = None) -> list[dict]:
-    """對多檔依序分析（供選股報告）。sources: stock_id → 候選來源。"""
+                   sources: dict[str, str] | None = None,
+                   progress=None, should_cancel=None) -> list[dict]:
+    """對多檔依序分析（供選股報告）。sources: stock_id → 候選來源。
+
+    progress：可選回呼 progress(stage, current, total)，供 WebUI 實時顯示逐檔＋子階段進度。
+    should_cancel：可選回呼，回傳 True 則在下一檔前中止；已完成的紀錄照常回傳給呼叫端善後。
+    """
     out = []
-    for sid in stock_ids:
-        rec = analyze_stock(sid, as_of, source=(sources or {}).get(sid, "screener"))
+    total = len(stock_ids)
+    for i, sid in enumerate(stock_ids):
+        if should_cancel and should_cancel():
+            break
+        on_step = None
+        if progress:
+            def on_step(label, _sid=sid, _i=i):
+                progress(f"分析 {_sid} · {label}", _i + 1, total)
+            on_step("啟動")
+        rec = analyze_stock(sid, as_of, source=(sources or {}).get(sid, "screener"),
+                            on_step=on_step)
         if rec:
             out.append(rec)
     return out
