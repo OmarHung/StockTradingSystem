@@ -15,7 +15,23 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
   const poll = useRef<number | null>(null);
 
   const load = () => api.portfolio().then(setData).catch(() => {});
-  useEffect(() => { load(); return () => { if (poll.current) clearInterval(poll.current); }; }, []);
+
+  // 常駐輪詢每日流程狀態（每 4s）：不管從哪裡觸發（排程自動/設定分頁/本面板）
+  // 都同步顯示執行中；跑完自動重載持倉。
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    load();
+    const t = window.setInterval(async () => {
+      try {
+        const s = await api.dailyStatus();
+        setDailyRunning(s.running);
+        if (s.running) setDailyLog(s.log);
+        if (wasRunning.current && !s.running) load();   // 剛結束 → 更新持倉/曲線
+        wasRunning.current = s.running;
+      } catch { /* 後端暫時無回應，下輪再試 */ }
+    }, 4000);
+    return () => { clearInterval(t); if (poll.current) clearInterval(poll.current); };
+  }, []);
 
   // 權益曲線 vs TAIEX
   useEffect(() => {
@@ -43,13 +59,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
   const runDaily = async () => {
     try {
       await api.dailyRun();
-      setDailyRunning(true);
-      if (poll.current) clearInterval(poll.current);
-      poll.current = window.setInterval(async () => {
-        const s = await api.dailyStatus();
-        setDailyRunning(s.running); setDailyLog(s.log);
-        if (!s.running) { clearInterval(poll.current!); poll.current = null; load(); }
-      }, 1500);
+      setDailyRunning(true);   // 立即回饋；後續狀態由常駐輪詢接手
     } catch (e) { alert(String(e)); }
   };
 
