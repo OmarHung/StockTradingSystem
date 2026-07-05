@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import anthropic
 from pydantic import BaseModel, Field
 
@@ -168,10 +170,28 @@ def _search_policy_news(model: str, as_of: str) -> str:
     return notes
 
 
+_UNCERTAIN_PAT = re.compile(r"需確認|待確認|不確定|存疑|不甚確定")
+_NAME_NOISE_PAT = re.compile(r"股份有限公司|控股|-KY|\*|\s")
+
+
+def _name_matches(db_name: str, llm_name: str) -> bool:
+    """寬鬆比對 LLM 名稱與股票池名稱：去尾綴後互相包含即視為一致。
+
+    LLM 常回全名（漢翔航空工業）而資料庫存簡稱（漢翔），故用包含而非相等；
+    任一方為空時視為一致（無從比對，交給後續分析師層把關）。
+    """
+    a = _NAME_NOISE_PAT.sub("", db_name or "")
+    b = _NAME_NOISE_PAT.sub("", llm_name or "")
+    if not a or not b:
+        return True
+    return a in b or b in a
+
+
 def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int) -> list[dict]:
-    """硬性驗證：代號存在於股票池、非 ETF、價格資料足夠深度分析。"""
+    """硬性驗證：代號存在於股票池、非 ETF、代號與名稱一致、價格資料足夠深度分析。"""
     cfg = get_settings()
     out: list[dict] = []
+    seen: set[str] = set()
     with db.connect(cfg.db_path) as conn:
         info = {r[0]: (r[1], r[2]) for r in conn.execute(
             "SELECT stock_id, stock_name, type FROM stock_info")}
@@ -180,14 +200,28 @@ def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int) -> list[dict]
             if len(sid) != 4 or not sid.isdigit() or sid.startswith("00"):
                 log.info("scout 候選 %s(%s) 代號無效/ETF，略過", sid, c.name)
                 continue
+            if sid in seen:
+                log.info("scout 候選 %s(%s) 代號重複，略過", sid, c.name)
+                continue
             if sid not in info or info[sid][1] not in ("twse", "tpex"):
                 log.info("scout 候選 %s(%s) 不在上市櫃股票池，略過", sid, c.name)
+                continue
+            # LLM 幻覺代號時常掛上另一家公司的名字——代號查得到但名不對，
+            # 若照代號覆寫名稱會把幻覺洗白成合法候選，必須整檔剔除。
+            if not _name_matches(info[sid][0], c.name):
+                log.warning("scout 候選 %s：LLM 名稱「%s」與股票池「%s」不符，疑似代號幻覺，略過",
+                            sid, c.name, info[sid][0])
+                continue
+            if _UNCERTAIN_PAT.search(c.reason or ""):
+                log.warning("scout 候選 %s(%s) reason 自述不確定：「%s」，略過",
+                            sid, c.name, c.reason)
                 continue
             n = conn.execute(
                 "SELECT COUNT(*) FROM price_daily WHERE stock_id=?", (sid,)).fetchone()[0]
             if n < 60:
                 log.info("scout 候選 %s(%s) 價格資料不足（%d 天 <60），略過", sid, c.name, n)
                 continue
+            seen.add(sid)
             out.append({"stock_id": sid, "name": info[sid][0] or c.name,
                         "theme": c.theme, "reason": c.reason})
             if len(out) >= max_c:
