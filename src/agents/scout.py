@@ -169,15 +169,12 @@ def _search_policy_news(model: str, as_of: str) -> str:
 
 
 def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int) -> list[dict]:
-    """硬性驗證：代號存在於股票池、非 ETF/處置股、價格資料足夠深度分析。"""
-    from src.data import fetchers
-
+    """硬性驗證：代號存在於股票池、非 ETF、價格資料足夠深度分析。"""
     cfg = get_settings()
     out: list[dict] = []
     with db.connect(cfg.db_path) as conn:
         info = {r[0]: (r[1], r[2]) for r in conn.execute(
             "SELECT stock_id, stock_name, type FROM stock_info")}
-        disp = fetchers.current_disposition_ids(conn, as_of)
         for c in cands:
             sid = (c.stock_id or "").strip()
             if len(sid) != 4 or not sid.isdigit() or sid.startswith("00"):
@@ -185,9 +182,6 @@ def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int) -> list[dict]
                 continue
             if sid not in info or info[sid][1] not in ("twse", "tpex"):
                 log.info("scout 候選 %s(%s) 不在上市櫃股票池，略過", sid, c.name)
-                continue
-            if sid in disp:
-                log.info("scout 候選 %s(%s) 為處置股，略過", sid, c.name)
                 continue
             n = conn.execute(
                 "SELECT COUNT(*) FROM price_daily WHERE stock_id=?", (sid,)).fetchone()[0]

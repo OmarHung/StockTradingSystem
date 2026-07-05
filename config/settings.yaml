@@ -12,14 +12,12 @@ data:
     request_interval_sec: 0.35     # 每次請求間隔（避免觸發頻率限制）
     max_retries: 4
 
-# ---- 股票池篩選（Phase 0 只做基本排除，處置/警示於後續階段強化）----
+# ---- 股票池篩選（僅做結構性排除；處置股照常納入，僅標記顯示不過濾）----
 universe:
   markets:                         # 上市 + 上櫃
     - twse
     - tpex
   include_etf: false               # 是否納入 ETF
-  exclude_full_delivery: true      # 排除全額交割股（需事件資料，旗標保留）
-  exclude_disposition: true        # 排除處置股（同上）
   min_stock_id_len: 4              # 一般普通股代號為 4 碼
 
 # ---- 選股 Screener（Phase 1）----

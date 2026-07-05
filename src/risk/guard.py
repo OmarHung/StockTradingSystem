@@ -112,24 +112,20 @@ def position_size(capital: float, per_trade_risk_pct: float,
 
 
 def evaluate(cand: TradeCandidate, port: PortfolioState, cfg: RiskConfig,
-             disposition_ids: set[str] | None = None,
              as_of: str | None = None) -> GuardResult:
     """跑完整 Guard pipeline。回傳核准股數或駁回原因（含逐閘紀錄）。"""
     r = GuardResult(approved=False)
     as_of = as_of or dt.date.today().isoformat()
-    disposition_ids = disposition_ids or set()
 
     def reject(gate: str, reason: str) -> GuardResult:
         r._log(gate, False, reason)
         r.reject_gate, r.reject_reason = gate, reason
         return r
 
-    # ① 黑名單 / 處置股
+    # ① 黑名單（處置股已納入系統，不再攔阻）
     if cand.stock_id in cfg.blacklist:
         return reject("blacklist", f"{cand.stock_id} 在黑名單")
-    if cand.stock_id in disposition_ids:
-        return reject("disposition", f"{cand.stock_id} 為處置股（官方名單）")
-    r._log("blacklist", True, "非黑名單/處置股")
+    r._log("blacklist", True, "非黑名單")
 
     # ② 回撤熔斷
     dd = port.drawdown_pct

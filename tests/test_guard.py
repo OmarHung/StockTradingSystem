@@ -72,12 +72,6 @@ def test_reject_circuit_breaker():
     assert not r.approved and r.reject_gate == "circuit_breaker"
 
 
-def test_reject_disposition():
-    r = evaluate(_cand(), PortfolioState.empty(1_000_000), CFG,
-                 disposition_ids={"2330"})
-    assert not r.approved and r.reject_gate == "disposition"
-
-
 def test_single_position_cap_shrinks():
     # 停損距離極小 → 風險部位法會算出超大股數 → 應被單股 15% 上限縮減
     port = PortfolioState.empty(1_000_000)

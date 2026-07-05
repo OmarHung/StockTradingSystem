@@ -299,7 +299,7 @@ def current_disposition_ids(conn, as_of: str | None = None) -> set[str]:
 def select_universe(conn, cfg) -> list[str]:
     """依 config 的 universe 條件，從 stock_info 選出要回補的股票代號清單。
 
-    結構性排除（市場別、代號長度、ETF）+ 處置股排除（官方名單，旗標生效）。
+    結構性排除（市場別、代號長度、ETF）。處置股照常納入（僅在下單風控前提醒）。
     """
     u = cfg["universe"]
     df = db.read_sql(conn, """
@@ -320,14 +320,6 @@ def select_universe(conn, cfg) -> list[str]:
         mask &= df["industry_category"].fillna("") != "ETF"
 
     ids = sorted(df.loc[mask, "stock_id"].tolist())
-
-    # 處置股排除（旗標生效；名單由 fetch_disposition 維護）
-    if u.get("exclude_disposition", True):
-        bad = current_disposition_ids(conn)
-        if bad:
-            before = len(ids)
-            ids = [s for s in ids if s not in bad]
-            log.info("排除處置股 %d 檔", before - len(ids))
 
     log.info("股票池篩選：%d / %d 檔符合條件", len(ids), len(df))
     return ids

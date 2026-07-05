@@ -93,7 +93,7 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
     """對 buy 計畫跑 Guard pipeline；駁回寫 friction_log。非 buy 回 None。"""
     if plan.action != "buy":
         return None
-    from src.data import fetchers, query as q
+    from src.data import query as q
     from src.risk import guard as G
 
     cfg = get_settings()
@@ -122,8 +122,7 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
         log.error("讀取帳本失敗，Guard 以空倉評估：%s", e)
         port = G.PortfolioState.empty(float(cfg["capital"]["total"]))
     with db.connect(cfg.db_path) as conn:
-        disp = fetchers.current_disposition_ids(conn, as_of)
-        res = G.evaluate(cand, port, rcfg, disposition_ids=disp, as_of=as_of)
+        res = G.evaluate(cand, port, rcfg, as_of=as_of)
         if not res.approved:
             conn.execute(
                 "INSERT INTO friction_log (ts, as_of, stock_id, gate, reason, plan_json) "
