@@ -95,6 +95,10 @@ tests/             測試
 - [USAGE.md](USAGE.md) — 使用手冊：安裝、設定、介面導覽、日常操作、常見問題
 - [PLAN.md](PLAN.md) — 系統規劃書：架構設計、技術選型、分階段執行計畫
 
+## 授權
+
+本專案採 [AGPL-3.0](LICENSE) 授權。前端交易終端衍生自 [Sinotrade/shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)（AGPL-3.0，© Sinotrade），依其條款以相同授權釋出。[CryptoTrade](https://github.com/Xtra-Computing/CryptoTrade) 與 [LLM_trader](https://github.com/qrak/LLM_trader) 為架構設計之理念參考。
+
 ## 免責聲明
 
 本專案僅供研究與教育用途，不構成任何投資建議。目前以模擬帳本（paper trading）運行；實盤交易涉及重大財務風險，使用者須自行承擔一切後果。
