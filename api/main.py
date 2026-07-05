@@ -110,6 +110,21 @@ def stock_series(stock_id: str):
     return q.stock_series(stock_id)
 
 
+@app.get("/api/stocks/{stock_id}/events")
+def stock_events(stock_id: str):
+    """K 線標記用事件：除權息（日期/類別/配發）+ 分割減資（公司行動）。"""
+    with db.connect(get_settings().db_path) as conn:
+        div = [{"date": r[0], "kind": r[1] or "權息", "amount": r[2]}
+               for r in conn.execute(
+                   "SELECT date, kind, dividend FROM dividend WHERE stock_id=? ORDER BY date",
+                   (stock_id,))]
+        cap = [{"date": r[0], "kind": r[1], "before": r[2], "after": r[3]}
+               for r in conn.execute(
+                   "SELECT date, kind, before_price, after_price FROM capital_change "
+                   "WHERE stock_id=? ORDER BY date", (stock_id,))]
+    return {"dividends": div, "capital_changes": cap}
+
+
 # ---------- 行情 ----------
 @app.get("/api/price/{stock_id}")
 def price(stock_id: str, start: str | None = None, end: str | None = None,

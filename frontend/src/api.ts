@@ -78,6 +78,10 @@ export const api = {
   stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
   stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),
   stockSeries: (id: string) => get<Record<string, any>>(`/stocks/${id}/series`),
+  stockEvents: (id: string) => get<{
+    dividends: { date: string; kind: string; amount: number | null }[];
+    capital_changes: { date: string; kind: string; before: number; after: number }[];
+  }>(`/stocks/${id}/events`),
   schedulerStatus: () => get<Record<string, any>[]>("/scheduler/status"),
   schedulerConfig: (name: string, enabled: boolean, time: string) =>
     post<{ saved: boolean }>("/scheduler/config", { name, enabled, time }),

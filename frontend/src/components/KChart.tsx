@@ -1,8 +1,8 @@
 import { CandlestickChart } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-  createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
-  type IChartApi, type Time, type MouseEventParams,
+  createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
+  type IChartApi, type Time, type MouseEventParams, type SeriesMarker,
 } from "lightweight-charts";
 import { api } from "../api";
 import { Panel, StarButton } from "./Panel";
@@ -107,6 +107,35 @@ export function KChart({
         { bar: c, prevClose: i > 0 ? candles[i - 1].close : null }));
       setInfoFromBar(candles[candles.length - 1]);
       chart.timeScale().fitContent();
+
+      // 除權息/分割減資 事件標記（僅日線：週/月K 的 bar 日期對不上事件日）
+      if (tf === "D") {
+        api.stockEvents(stockId).then((ev) => {
+          if (cancelled) return;
+          const markers: SeriesMarker<Time>[] = [];
+          for (const d of ev.dividends) {
+            if (!barMap.has(d.date)) continue;
+            const kind = d.kind.replace("除", "");
+            markers.push({
+              time: d.date as Time, position: "belowBar", shape: "circle",
+              color: "#f0b90b", size: 0.7,
+              text: `${kind}${d.amount != null ? " " + Number(d.amount).toFixed(1) : ""}`,
+            });
+          }
+          for (const c of ev.capital_changes) {
+            if (!barMap.has(c.date)) continue;
+            markers.push({
+              time: c.date as Time, position: "belowBar", shape: "square",
+              color: "#ab47bc", size: 0.7,
+              text: c.kind === "auto_split" ? "分割" : "減資",
+            });
+          }
+          if (markers.length) {
+            markers.sort((a, b) => String(a.time) < String(b.time) ? -1 : 1);
+            createSeriesMarkers(candle, markers);
+          }
+        }).catch(() => {});
+      }
     });
 
     const onMove = (p: MouseEventParams) => {
