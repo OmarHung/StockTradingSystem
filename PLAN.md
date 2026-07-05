@@ -114,10 +114,7 @@ StockTradingSystem/
 │   ├── broker/                   # base / backtest / paper(shioaji) / live(shioaji)
 │   ├── report/                   # 日報、績效統計
 │   └── pipeline/                 # daily_pipeline.py（每日主流程）
-├── webui/
-│   ├── app.py                    # Streamlit 入口
-│   └── pages/                    # 1_設定.py、2_資料狀態.py、3_選股報告.py、
-│                                 # 4_回測.py、5_持倉績效.py、6_大腦活動.py、7_反思規則庫.py
+├── api/ + frontend/              # FastAPI 後端 + React 交易終端（2026-07 取代 Streamlit）
 ├── scripts/                      # backfill、run_backtest、run_daily
 └── tests/
 ```
@@ -246,7 +243,7 @@ StockTradingSystem/
 | tick/分鐘級儲存（Parquet+DuckDB） | Phase 6 實盤需要再做 |
 | 橫斷面索引 (date, stock_id) | 選股查詢變慢時再加 |
 | 財報三表/借券資料 | 基本面分析師火力升級（估值 PER/PBR/殖利率已接入，財報三表/借券仍缺） |
-| Streamlit legacy UI 移除 | React 已全面取代，留參考無害 |
+| ~~Streamlit legacy UI 移除~~ | ✅ 已刪（2026-07-05），requirements 同步移除 streamlit |
 
 ### 🎁 稽核後加碼完成（2026-07-04 ~ 07-05）
 - **除權息預告**：TWSE TWT48U_ALL + TPEx prepost 快照 → `dividend_forecast` 表，

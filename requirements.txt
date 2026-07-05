@@ -13,7 +13,6 @@ tqdm>=4.66             # 回補進度條
 ruamel.yaml>=0.18      # 保留註解的 YAML 讀寫（WebUI 存檔用）
 
 # --- Phase 1：回測 + WebUI ---
-streamlit>=1.40        # WebUI
 plotly>=5.20           # 圖表
 
 # --- Phase 2：LLM Agent ---
