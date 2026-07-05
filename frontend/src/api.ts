@@ -111,6 +111,12 @@ export const api = {
     get<{ running: boolean; log: string; result: BacktestResult | null }>("/backtest/status"),
   analyze: (asOf: string, topN: number) =>
     post<Record<string, any>[]>("/analyze", { as_of: asOf, top_n: topN }),
+  scout: (asOf: string) => get<{
+    as_of: string; source: string; summary: string;
+    headlines: { date: string; title: string; source: string; url: string }[];
+    candidates: { stock_id: string; name: string; theme: string; reason: string }[];
+    created_at: string;
+  } | null>(`/scout?as_of=${asOf}`),
   tradePlans: (asOf: string) => get<Record<string, any>[]>(`/trade-plans?as_of=${asOf}`),
   tradePlansLatestDate: () => get<{ as_of: string | null }>("/trade-plans/latest-date"),
   brainLog: (limit = 100) => get<Record<string, any>[]>(`/brain-log?limit=${limit}`),

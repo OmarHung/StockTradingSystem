@@ -50,6 +50,17 @@ def validate_fundamental(report, feats: dict, stock_id: str, as_of: str) -> tupl
     return _finish("fundamental", flags, report.confidence, stock_id, as_of)
 
 
+def validate_news(report, feats: dict, stock_id: str, as_of: str) -> tuple[bool, list[str], float]:
+    flags = []
+    actual = feats.get("news_count")
+    if report.cited_news_count is not None and actual is not None \
+            and int(report.cited_news_count) != int(actual):
+        flags.append(
+            f"新聞則數宣稱 {report.cited_news_count} 與實際提供 {actual} 不符"
+        )
+    return _finish("news", flags, report.confidence, stock_id, as_of)
+
+
 def _finish(agent, flags, confidence, stock_id, as_of):
     if not flags:
         return True, [], confidence

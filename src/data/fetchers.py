@@ -179,6 +179,69 @@ def fetch_month_revenue(client: FinMindClient, conn, stock_id: str, start: str, 
     return n
 
 
+# ---- 個股新聞 ----
+def fetch_news_day(client: FinMindClient, conn, stock_id: str, day: str) -> int:
+    """抓單檔單日新聞。TaiwanStockNews 資料量大，API 限制一次只回一天
+    （end_date 必須留空），所以只能逐日呼叫。"""
+    raw = client.get_dataset("TaiwanStockNews", data_id=stock_id, start_date=day)
+    if raw.empty:
+        return 0
+    df = raw.copy()
+    df["published_at"] = df["date"].astype(str)
+    df["date"] = df["published_at"].str[:10]
+    df = df.rename(columns={"link": "url"})
+    cols = [c for c in ("stock_id", "date", "published_at", "title", "source", "url")
+            if c in df.columns]
+    df = df[cols].dropna(subset=["title"]).drop_duplicates(["stock_id", "date", "title"])
+    n = db.upsert_dataframe(conn, "news", df)
+    _update_log(conn, "news", stock_id, df["date"])
+    return n
+
+
+def ensure_news(stock_id: str, as_of: str, lookback_days: int = 10) -> None:
+    """按需抓取單檔近期新聞（只對進入深度分析的個股，逐日呼叫）。
+
+    以 fetch_log(dataset='news_check') 記錄「已檢查到哪天」——即使某天無新聞
+    也算檢查過，下次只補新的日子，避免重跑管線時反覆空查。
+    抓取失敗（額度/網路）只記警告不拋出，失敗當天起不標記（下次續抓），
+    新聞分析師以資料庫既有內容（可能為空）繼續。
+    """
+    from src.config import get_settings
+
+    cfg = get_settings()
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with db.connect(cfg.db_path) as conn:
+        _, checked_to = db.get_range(conn, "news_check", stock_id)
+        window_start = (dt.date.fromisoformat(as_of)
+                        - dt.timedelta(days=lookback_days)).isoformat()
+        # 要補的日子 = 窗口起點 ~ as_of，其中已檢查過的（<= checked_to）跳過
+        first = window_start
+        if checked_to and checked_to >= as_of:
+            return
+        if checked_to and checked_to >= window_start:
+            first = (dt.date.fromisoformat(checked_to) + dt.timedelta(days=1)).isoformat()
+
+        fm = cfg.finmind
+        client = FinMindClient(
+            base_url=fm["base_url"], token=cfg.finmind_token,
+            request_interval_sec=fm["request_interval_sec"], max_retries=fm["max_retries"],
+        )
+        total, day = 0, dt.date.fromisoformat(first)
+        end = dt.date.fromisoformat(as_of)
+        while day <= end:
+            try:
+                total += fetch_news_day(client, conn, stock_id, day.isoformat())
+            except Exception as e:  # noqa: BLE001 — 額度用罄/網路錯：保留進度下次續抓
+                log.warning("新聞抓取 %s %s 失敗（已抓 %d 則，下次續抓）：%s",
+                            stock_id, day, total, e)
+                break
+            # 逐日推進檢查標記：中途失敗也不會重抓已完成的日子
+            db.merge_range(conn, "news_check", stock_id, day.isoformat(), day.isoformat(), now)
+            day += dt.timedelta(days=1)
+        if total:
+            log.info("新聞抓取 %s：%d 則（%s ~ %s）", stock_id, total, first, as_of)
+
+
 def _update_log(conn, dataset: str, stock_id: str, dates: pd.Series) -> None:
     if dates.empty:
         return

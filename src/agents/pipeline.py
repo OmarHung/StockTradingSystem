@@ -16,8 +16,11 @@ from src.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-def analyze_stock(stock_id: str, as_of: str) -> dict | None:
-    """跑完整決策流程，回傳並存檔一份交易計畫（含各分析師報告與驗證結果）。"""
+def analyze_stock(stock_id: str, as_of: str, source: str = "screener") -> dict | None:
+    """跑完整決策流程，回傳並存檔一份交易計畫（含各分析師報告與驗證結果）。
+
+    source：候選來源（screener=量化初篩 / news_scout=政策題材偵察），供報告標示。
+    """
     llm.new_run()  # 本次管線的所有 LLM 呼叫/攔截共用一個 run_id（大腦活動分組）
     bundle: dict = {}
     tech_feats: dict = {}
@@ -49,20 +52,29 @@ def analyze_stock(stock_id: str, as_of: str) -> dict | None:
     except Exception as e:  # noqa: BLE001
         log.error("fundamental %s 失敗：%s", stock_id, e)
 
+    # 4) 新聞面（按需抓取；冷門股無新聞或額度用罄時自動缺席，不影響其他分析師）
+    try:
+        rpt, feats = analysts.run_news(stock_id, as_of)
+        if rpt:
+            ok, flags, conf = validator.validate_news(rpt, feats, stock_id, as_of)
+            bundle["news"] = _entry(rpt, conf, flags)
+    except Exception as e:  # noqa: BLE001
+        log.error("news %s 失敗：%s", stock_id, e)
+
     if not bundle:
         log.warning("%s 無任何分析師報告（資料不足？）", stock_id)
         return None
 
-    # 4) 交易員綜合決策
+    # 5) 交易員綜合決策
     plan = trader.run_trader(stock_id, as_of, bundle, tech_feats)
 
     record = {
-        "as_of": as_of, "stock_id": stock_id,
+        "as_of": as_of, "stock_id": stock_id, "source": source,
         "plan": plan.model_dump(),
         "analysts": bundle,
     }
 
-    # 5) Guard pipeline：buy 計畫必須通過硬性風控閘門才核准部位（LLM 不可逾越）
+    # 6) Guard pipeline：buy 計畫必須通過硬性風控閘門才核准部位（LLM 不可逾越）
     record["guard"] = _run_guard(stock_id, as_of, plan)
 
     _save_plan(record)
@@ -125,11 +137,12 @@ def _run_guard(stock_id: str, as_of: str, plan) -> dict | None:
     }
 
 
-def analyze_stocks(stock_ids: list[str], as_of: str) -> list[dict]:
-    """對多檔依序分析（供選股報告）。回傳成功的紀錄清單。"""
+def analyze_stocks(stock_ids: list[str], as_of: str,
+                   sources: dict[str, str] | None = None) -> list[dict]:
+    """對多檔依序分析（供選股報告）。sources: stock_id → 候選來源。"""
     out = []
     for sid in stock_ids:
-        rec = analyze_stock(sid, as_of)
+        rec = analyze_stock(sid, as_of, source=(sources or {}).get(sid, "screener"))
         if rec:
             out.append(rec)
     return out

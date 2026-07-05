@@ -63,6 +63,7 @@ const TABS = [
   { key: "overview", label: "總覽" },
   { key: "chips", label: "籌碼" },
   { key: "fund", label: "基本面" },
+  { key: "news", label: "新聞" },
   { key: "dividend", label: "除權息" },
   { key: "coverage", label: "資料覆蓋" },
 ];
@@ -333,6 +334,26 @@ export function StockBrowserModal({ onClose, onSelect }: {
                           {f.next_ex_date}{f.next_ex_cash_dividend != null ? `　${fmt(f.next_ex_cash_dividend, 2)} 元` : ""}
                         </span>} />
                     )}
+                  </div>
+                )}
+
+                {tab === "news" && (
+                  <div>
+                    {(d.news ?? []).length === 0 && (
+                      <div className="empty-hint">
+                        尚無庫存新聞。個股新聞在進入 AI 深度分析時按需抓取（FinMind），
+                        跑過「分析」後這裡就會有資料。
+                      </div>
+                    )}
+                    {(d.news as any[] ?? []).map((n, i) => (
+                      <div key={i} style={{ padding: "7px 2px", fontSize: 12, borderBottom: "1px solid var(--border)" }}>
+                        <span className="mono" style={{ color: "var(--text-dim)", marginRight: 8 }}>{n.date}</span>
+                        {n.url
+                          ? <a href={n.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{n.title}</a>
+                          : n.title}
+                        {n.source && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>（{n.source}）</span>}
+                      </div>
+                    ))}
                   </div>
                 )}
 

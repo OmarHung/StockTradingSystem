@@ -17,6 +17,8 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   const [loading, setLoading] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});   // 卡片展開狀態（預設收闔）
+  const [scout, setScout] = useState<Awaited<ReturnType<typeof api.scout>>>(null);
+  const [scoutOpen, setScoutOpen] = useState(false);               // 偵察區塊展開（含新聞標題清單）
 
   // 股名對照表（一次載入；歷史報告也吃得到）
   useEffect(() => {
@@ -35,15 +37,19 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
       });
   }, []);
 
-  // 日期切換（含初始）→ 載入該日已存計畫；報告不再被日期藏起來
+  // 日期切換（含初始）→ 載入該日已存計畫與偵察快照；報告不再被日期藏起來
   useEffect(() => {
     if (!asOf) return;
     api.tradePlans(asOf).then(setRecs).catch(() => {});
+    api.scout(asOf).then(setScout).catch(() => setScout(null));
   }, [asOf]);
 
   const run = async () => {
     setLoading(true);
-    try { setRecs(await api.analyze(asOf, topN)); }
+    try {
+      setRecs(await api.analyze(asOf, topN));
+      api.scout(asOf).then(setScout).catch(() => {});
+    }
     catch (e) { alert(String(e)); }
     finally { setLoading(false); }
   };
@@ -59,8 +65,50 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
         </div>
       }>
       {!hasKey && <div className="empty-hint">未設定 ANTHROPIC_API_KEY，無法執行 LLM 分析。</div>}
-      {loading && <div className="spinner">分析師團隊 + 交易員決策中（每檔約 4 次 LLM 呼叫）…</div>}
+      {loading && <div className="spinner">分析師團隊 + 交易員決策中（每檔約 5 次 LLM 呼叫）…</div>}
       <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* 🛰️ 政策題材偵察快照：當日掃到的新聞與候選（點標題展開新聞清單） */}
+        {scout && (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10,
+            background: "rgba(240,185,11,0.04)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+              onClick={() => setScoutOpen((v) => !v)}>
+              <span style={{ color: "var(--text-dim)", fontSize: 10, width: 12 }}>{scoutOpen ? "▼" : "▶"}</span>
+              <b style={{ fontSize: 12 }}>🛰️ 政策題材偵察</b>
+              <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                掃描 {scout.headlines.length} 則新聞（{scout.source === "rss" ? "RSS" : "Web搜尋"}）
+                → 候選 {scout.candidates.length} 檔
+              </span>
+            </div>
+            {scout.candidates.length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {scout.candidates.map((c) => (
+                  <span key={c.stock_id} className="tag" title={c.reason}
+                    style={{ background: "rgba(240,185,11,0.15)", color: "var(--warning)", cursor: "pointer" }}
+                    onClick={() => onSelect(c.stock_id)}>
+                    📰 {c.stock_id} {c.name}・{c.theme}
+                  </span>
+                ))}
+              </div>
+            )}
+            {scoutOpen && (
+              <div style={{ marginTop: 8 }}>
+                {scout.summary && <div style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>{scout.summary}</div>}
+                <div style={{ maxHeight: 220, overflow: "auto", fontSize: 11, color: "var(--text-dim)" }}>
+                  {scout.headlines.map((h, i) => (
+                    <div key={i} style={{ padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+                      <span className="mono" style={{ marginRight: 6 }}>{h.date.slice(5)}</span>
+                      {h.url
+                        ? <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{h.title}</a>
+                        : <span style={{ color: "var(--text)" }}>{h.title}</span>}
+                      <span style={{ marginLeft: 6 }}>（{h.source}）</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {[...recs].sort((a, b) => b.plan.action_score - a.plan.action_score).map((rec) => {
           const p = rec.plan;
           const a = ACTION[p.action] ?? { cls: "hold", label: p.action };
@@ -75,6 +123,10 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                 <b onClick={(e) => { e.stopPropagation(); onSelect(rec.stock_id); }}>
                   {rec.stock_id}{names[rec.stock_id] ? ` ${names[rec.stock_id]}` : ""}
                 </b>
+                {rec.source === "news_scout" && (
+                  <span className="tag" style={{ background: "rgba(240,185,11,0.15)", color: "var(--warning)" }}
+                    title="由政策題材偵察（新聞掃描）加入的候選，非量化初篩名額">📰 題材</span>
+                )}
                 {rec.guard && (
                   <span style={{ fontSize: 11 }}>
                     {rec.guard.approved ? "🛡️✅" : "🛡️✗"}
@@ -108,7 +160,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
               {expanded && <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {Object.entries(rec.analysts ?? {}).map(([k, e]: [string, any]) => (
                   <span key={k} style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                    {({ technical: "技術", chips: "籌碼", fundamental: "基本" } as any)[k] ?? k}:{" "}
+                    {({ technical: "技術", chips: "籌碼", fundamental: "基本", news: "新聞" } as any)[k] ?? k}:{" "}
                     <span className={e.report.score > 0 ? "up" : e.report.score < 0 ? "down" : "flat"}>
                       {e.report.signal} {fmt(e.report.score)}
                     </span>

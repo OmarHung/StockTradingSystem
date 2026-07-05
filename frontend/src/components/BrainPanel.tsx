@@ -5,10 +5,11 @@ import { api } from "../api";
 import { Panel } from "./Panel";
 
 const ICON: Record<string, string> = {
-  technical: "📊", chips: "💰", fundamental: "📈", trader: "🧑‍💼",
+  technical: "📊", chips: "💰", fundamental: "📈", news: "📰", scout: "🛰️", trader: "🧑‍💼",
 };
 const AGENT_LABEL: Record<string, string> = {
-  technical: "技術面", chips: "籌碼面", fundamental: "基本面", trader: "交易員",
+  technical: "技術面", chips: "籌碼面", fundamental: "基本面", news: "新聞面",
+  scout: "題材偵察", trader: "交易員",
 };
 
 /** 從 "YYYY-MM-DD HH:MM:SS" 取出 HH:MM，取不到就原樣返回。 */

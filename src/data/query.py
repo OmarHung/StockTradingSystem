@@ -242,6 +242,21 @@ def get_dividend_forecast(stock_id: str, after: str | None = None) -> pd.DataFra
         return db.read_sql(conn, sql, tuple(params))
 
 
+def get_news(stock_id: str, start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    """取單檔新聞（日期升冪；end 含當日，供無前視的 as_of 過濾）。"""
+    sql = "SELECT * FROM news WHERE stock_id=?"
+    params: list = [stock_id]
+    if start:
+        sql += " AND date>=?"
+        params.append(start)
+    if end:
+        sql += " AND date<=?"
+        params.append(end)
+    sql += " ORDER BY date, published_at"
+    with db.connect(_db_path()) as conn:
+        return db.read_sql(conn, sql, tuple(params))
+
+
 def get_valuation(stock_id: str) -> pd.DataFrame:
     """每日估值（本益比/股價淨值比/殖利率%），日期升冪。"""
     with db.connect(_db_path()) as conn:
@@ -464,6 +479,10 @@ def stock_detail(stock_id: str) -> dict:
                                "FROM dividend_forecast WHERE stock_id=? AND date>=? ORDER BY date",
                          (stock_id, _dt.date.today().isoformat()))
         detail["dividend_forecasts"] = fc.to_dict(orient="records")
+    # 個股新聞（新聞分析師按需抓取後的庫存，新到舊，最多 15 則）
+    nw = get_news(stock_id)
+    detail["news"] = (nw.sort_values(["date", "published_at"], ascending=False)
+                        .head(15).to_dict(orient="records")) if not nw.empty else []
     return detail
 
 

@@ -131,6 +131,29 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, date)
         )
     """,
+    # 個股新聞（FinMind TaiwanStockNews；只對進入 LLM 深度分析的個股按需抓取）
+    "news": """
+        CREATE TABLE IF NOT EXISTS news (
+            stock_id     TEXT NOT NULL,
+            date         TEXT NOT NULL,   -- 發布日期 YYYY-MM-DD
+            published_at TEXT,            -- 原始時間戳（含時分秒）
+            title        TEXT NOT NULL,
+            source       TEXT,            -- 媒體來源
+            url          TEXT,
+            PRIMARY KEY (stock_id, date, title)
+        )
+    """,
+    # 政策題材偵察每日快照（掃到的新聞標題 + LLM 總結 + 驗證後候選，供 WebUI 展示）
+    "scout_log": """
+        CREATE TABLE IF NOT EXISTS scout_log (
+            as_of           TEXT PRIMARY KEY,
+            source          TEXT,            -- rss / web
+            headlines_json  TEXT,            -- [{date,title,source,url}]
+            summary         TEXT,            -- LLM 題材總結
+            candidates_json TEXT,            -- 驗證後候選 [{stock_id,name,theme,reason}]
+            created_at      TEXT
+        )
+    """,
     # 處置/警示股名單（TWSE/TPEx 官方公告，含處置期間）
     "disposition": """
         CREATE TABLE IF NOT EXISTS disposition (

@@ -1,4 +1,4 @@
-"""三位資料型分析師：技術面、籌碼面、基本面。
+"""四位資料型分析師：技術面、籌碼面、基本面、新聞面。
 
 每位分析師拿到「實算特徵（ground truth）」，只做專業解讀並輸出結構化報告，
 並在 cited_* 欄位回填它引用的關鍵數字，供驗證層交叉比對。
@@ -13,6 +13,7 @@ from src.llm import client as llm
 from src.llm.schemas import (
     ChipsReport,
     FundamentalReport,
+    NewsReport,
     TechnicalReport,
     normalize_scores,
 )
@@ -61,6 +62,40 @@ def run_chips(stock_id: str, as_of: str) -> tuple[ChipsReport | None, dict]:
     rpt = llm.call_structured(
         model=_model(), system=system, user_prompt=prompt, schema=ChipsReport,
         agent="chips", stock_id=stock_id, as_of=as_of,
+    )
+    return normalize_scores(rpt) if rpt else rpt, feats
+
+
+def run_news(stock_id: str, as_of: str) -> tuple[NewsReport | None, dict]:
+    """新聞面分析師。新聞按需抓取（只對進入深度分析的個股，省 FinMind 額度）；
+
+    無新聞（冷門股/抓取失敗）回 (None, {})，管線自動跳過此報告。
+    """
+    from src.data import fetchers
+
+    ncfg = get_settings().get("news") or {}
+    fetchers.ensure_news(stock_id, as_of, lookback_days=int(ncfg.get("lookback_days", 10)))
+    feats = F.news_features(stock_id, as_of)
+    if not feats:
+        return None, feats
+    system = (
+        "你是專業台股新聞分析師。根據提供的『新聞標題清單』判讀消息面多空，"
+        "只能依據清單內容，不得腦補未提供的新聞或細節。輸出繁體中文。"
+        "特別留意『政策題材』：政府政策、法規鬆綁、補助、國家隊、公共建設、"
+        "國防軍工等題材常是飆股啟動的催化劑——若存在請把 policy_driven 設為 true "
+        "並在 key_themes 標註。也要辨識利空（處分、糾紛、訂單流失、調查）。"
+        "注意：只有標題沒有內文，對單則標題的解讀要保守；多則同向新聞才可提高信心。"
+        "cited_news_count 請照抄輸入的 news_count。"
+    )
+    prompt = (
+        f"股票代號 {stock_id}，基準日 {as_of}。近 {feats['lookback_days']} 日新聞如下：\n"
+        f"{json.dumps(feats, ensure_ascii=False, indent=2)}\n\n"
+        "請判斷新聞面方向（bullish/neutral/bearish）、是否政策題材驅動（policy_driven）、"
+        "給出 score[-1,1] 與 confidence[0,1]，並列出主題標籤、關鍵觀察與總結。"
+    )
+    rpt = llm.call_structured(
+        model=_model(), system=system, user_prompt=prompt, schema=NewsReport,
+        agent="news", stock_id=stock_id, as_of=as_of,
     )
     return normalize_scores(rpt) if rpt else rpt, feats
 

@@ -31,7 +31,10 @@ from src.data import database as db  # noqa: E402
 from src.data import query as q  # noqa: E402
 from src.llm import client as llm  # noqa: E402
 from src.llm import models as llm_models  # noqa: E402
+from src.logging_setup import get_logger  # noqa: E402
 from src.screener.screener import run_screener  # noqa: E402
+
+log = get_logger("api")
 
 app = FastAPI(title="StockTradingSystem API", version="0.1.0")
 
@@ -313,7 +316,32 @@ def analyze(req: AnalyzeReq):
     if ranked.empty:
         return []
     picks = ranked["stock_id"].head(req.top_n).tolist()
-    return pipeline.analyze_stocks(picks, req.as_of)
+    # 政策題材偵察：額外名額（不佔量化 top_n；失敗不影響量化候選）
+    sources = {sid: "screener" for sid in picks}
+    try:
+        from src.agents import scout as news_scout
+        for c in news_scout.run_news_scout(req.as_of):
+            if c["stock_id"] not in picks:
+                picks.append(c["stock_id"])
+                sources[c["stock_id"]] = "news_scout"
+    except Exception as e:  # noqa: BLE001
+        log.error("政策題材偵察失敗：%s", e)
+    return pipeline.analyze_stocks(picks, req.as_of, sources=sources)
+
+
+@app.get("/api/scout")
+def scout_snapshot(as_of: str):
+    """某日政策題材偵察快照（掃到的新聞標題 + 總結 + 候選）；無則回 null。"""
+    with db.connect(get_settings().db_path) as conn:
+        conn.execute(db.SCHEMA["scout_log"])  # 防禦性建表（舊 DB 未重啟 init 也能查）
+        row = conn.execute(
+            "SELECT source, headlines_json, summary, candidates_json, created_at "
+            "FROM scout_log WHERE as_of=?", (as_of,)).fetchone()
+    if not row:
+        return None
+    return {"as_of": as_of, "source": row[0],
+            "headlines": json.loads(row[1] or "[]"), "summary": row[2],
+            "candidates": json.loads(row[3] or "[]"), "created_at": row[4]}
 
 
 @app.get("/api/trade-plans")

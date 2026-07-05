@@ -107,6 +107,35 @@ def fundamental_features(stock_id: str, as_of: str) -> dict:
     return out
 
 
+def news_features(stock_id: str, as_of: str) -> dict:
+    """新聞面事實：近 N 日新聞標題清單（新到舊，截取上限則數）。
+
+    news_count 是「實際餵給 LLM 的則數」（截取後），同時是驗證層比對
+    cited_news_count 的基準。無新聞回 {} → 新聞分析師跳過。
+    """
+    from src.config import get_settings
+
+    ncfg = get_settings().get("news") or {}
+    lookback = int(ncfg.get("lookback_days", 10))
+    max_items = int(ncfg.get("max_items", 20))
+
+    start = _shift(as_of, lookback)
+    df = q.get_news(stock_id, start=start, end=as_of)
+    if df.empty:
+        return {}
+    df = df.sort_values(["date", "published_at"], ascending=False)
+    items = [
+        {"date": r.date, "source": r.source or "", "title": r.title}
+        for r in df.head(max_items).itertuples()
+    ]
+    return {
+        "lookback_days": lookback,
+        "news_count": len(items),          # 驗證基準：LLM 看到幾則就是幾則
+        "total_in_window": int(len(df)),   # 窗口內全部則數（供參考）
+        "items": items,
+    }
+
+
 def _f(v):
     return None if v is None or pd.isna(v) else round(float(v), 2)
 

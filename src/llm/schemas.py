@@ -61,6 +61,24 @@ class FundamentalReport(BaseModel):
     summary: str
 
 
+class NewsReport(BaseModel):
+    """新聞面分析師輸出。"""
+    signal: Signal
+    score: float = Field(description=_SCORE_DESC)
+    confidence: float = Field(description=_CONF_DESC)
+    policy_driven: bool = Field(
+        description="是否有政府政策/法規/補助/國家隊/公共建設等『政策題材』驅動的利多或利空"
+    )
+    cited_news_count: int | None = Field(
+        default=None, description="照抄輸入數據 news_count 的值（你實際看到的新聞則數）"
+    )
+    key_themes: list[str] = Field(
+        description="1-4 個新聞主題標籤（如：政策利多、接單動能、財報、經營糾紛）"
+    )
+    key_points: list[str] = Field(description="3-5 條關鍵觀察")
+    summary: str = Field(description="一段新聞面總結（繁體中文）")
+
+
 class TradePlan(BaseModel):
     """交易員 Agent 對單一標的的最終決策與進出場計畫。"""
     action: Literal["buy", "hold", "avoid"]
