@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /** 面板外框：標題列（含拖曳把手 class）+ 內容區。 */
 export function Panel({
@@ -46,4 +46,36 @@ export function fmt(n: number | null | undefined, digits = 2): string {
 export function cls(n: number | null | undefined): string {
   if (n === null || n === undefined) return "flat";
   return n > 0 ? "up" : n < 0 ? "down" : "flat";
+}
+
+/**
+ * 千分位金額輸入框：以逗號分隔顯示（1,234,567），輸入時即時格式化。
+ * 用 type="text" 是因為原生 type="number" 不會顯示千分位分隔。
+ * 僅接受非負整數（台股金額皆為整數新台幣）。
+ */
+export function MoneyInput({
+  value, onChange, style, className,
+}: {
+  value: number | null | undefined;
+  onChange: (v: number) => void;
+  style?: CSSProperties;
+  className?: string;
+}) {
+  const display =
+    value === null || value === undefined || Number.isNaN(value)
+      ? ""
+      : value.toLocaleString("en-US");
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={display}
+      className={className}
+      style={style}
+      onChange={(e) => {
+        const digits = e.target.value.replace(/[^\d]/g, "");
+        onChange(digits === "" ? 0 : Number(digits));
+      }}
+    />
+  );
 }

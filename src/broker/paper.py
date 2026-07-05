@@ -69,6 +69,11 @@ class PaperBroker:
         with db.connect(self.db_path) as conn:
             return db.read_sql(conn, "SELECT * FROM orders WHERE status='pending' ORDER BY id")
 
+    def orders(self, limit: int = 100) -> pd.DataFrame:
+        """委託史（全狀態，新到舊）：pending/filled/expired/cancelled。"""
+        with db.connect(self.db_path) as conn:
+            return db.read_sql(conn, "SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,))
+
     def fills(self, limit: int = 200) -> pd.DataFrame:
         with db.connect(self.db_path) as conn:
             return db.read_sql(conn, "SELECT * FROM fills ORDER BY id DESC LIMIT ?", (limit,))

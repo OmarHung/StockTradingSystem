@@ -1,6 +1,7 @@
 import { Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type ModelInfo } from "../api";
+import { MoneyInput } from "./Panel";
 
 type Tab = "capital" | "risk" | "screener" | "llm" | "sched" | "keys";
 const TABS: { id: Tab; label: string }[] = [
@@ -135,7 +136,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-body">
           {tab === "capital" && (
-            <NumRow label="總資金 (TWD)" step={100000}
+            <NumRow label="總資金 (TWD)" money
               value={cfg.capital?.total} onChange={(v) => setField("capital", "total", v)} />
           )}
 
@@ -162,7 +163,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               每日流程從量化排行取前 N 檔進 AI 決策（排程/手動皆用此值；成本 ≈ N × 5 次 LLM 呼叫）。改動即存。
             </div>
             <NumRow label="選出檔數 Top N" value={cfg.screener?.top_n} onChange={(v) => setField("screener", "top_n", v)} />
-            <NumRow label="20日均成交額下限 (元)" step={1000000} value={cfg.screener?.min_avg_turnover} onChange={(v) => setField("screener", "min_avg_turnover", v)} />
+            <NumRow label="20日均成交額下限 (元)" money value={cfg.screener?.min_avg_turnover} onChange={(v) => setField("screener", "min_avg_turnover", v)} />
             <NumRow label="籌碼回看天數" value={cfg.screener?.chips_lookback} onChange={(v) => setField("screener", "chips_lookback", v)} />
             <div className="form-hint" style={{ margin: "8px 0" }}>因子權重（越大越重要）</div>
             {Object.entries(cfg.screener?.weights ?? {}).map(([k, v]) => (
@@ -249,11 +250,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NumRow({ label, value, step = 1, onChange }: { label: string; value: number; step?: number; onChange: (v: number) => void }) {
+function NumRow({ label, value, step = 1, onChange, money = false }: { label: string; value: number; step?: number; onChange: (v: number) => void; money?: boolean }) {
   return (
     <div className="form-row">
       <label>{label}</label>
-      <input type="number" step={step} value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />
+      {money
+        ? <MoneyInput value={value} onChange={onChange} />
+        : <input type="number" step={step} value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />}
     </div>
   );
 }

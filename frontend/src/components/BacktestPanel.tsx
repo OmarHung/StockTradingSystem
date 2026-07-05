@@ -2,7 +2,7 @@ import { FlaskConical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createChart, createSeriesMarkers, LineSeries, ColorType, type IChartApi, type Time, type SeriesMarker } from "lightweight-charts";
 import { api, type BacktestResult } from "../api";
-import { fmt } from "./Panel";
+import { fmt, MoneyInput } from "./Panel";
 
 const STRATS = [
   { v: "screener", label: "多因子選股" },
@@ -115,8 +115,7 @@ function BacktestCore({ chartHeight = 200 }: { chartHeight?: number }) {
         <input type="date" value={end} onChange={(e) => setEnd(e.target.value)}
           style={{ width: 118, fontSize: 11 }} />
         <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>資金</span>
-        <input type="number" value={cash} step={100_000} min={100_000}
-          onChange={(e) => setCash(Number(e.target.value))}
+        <MoneyInput value={cash} onChange={setCash}
           style={{ width: 90, fontSize: 11 }} />
         <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>持倉上限</span>
         <input type="number" value={maxPos} min={1} max={30}

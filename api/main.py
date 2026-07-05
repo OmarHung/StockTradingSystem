@@ -353,6 +353,7 @@ def portfolio():
         "trading_enabled": broker.trading_enabled(),
         "positions": rows,
         "pending_orders": _records(broker.pending_orders()),
+        "orders": _records(broker.orders(100)),
         "fills": _records(broker.fills(100)),
         "performance": performance_summary(),
     }

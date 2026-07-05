@@ -7,7 +7,7 @@ import { Panel, fmt, cls } from "./Panel";
 /** 持倉績效：權益曲線 vs 大盤、持倉損益、成交明細、每日流程觸發、緊急停止。 */
 export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void }) {
   const [data, setData] = useState<Record<string, any> | null>(null);
-  const [tab, setTab] = useState<"pos" | "fills">("pos");
+  const [tab, setTab] = useState<"pos" | "orders" | "fills">("pos");
   const [dailyRunning, setDailyRunning] = useState(false);
   const [dailyLog, setDailyLog] = useState("");
   const chartRef = useRef<HTMLDivElement>(null);
@@ -122,6 +122,8 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
         <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
           <button className="btn" style={{ padding: "2px 8px", fontSize: 11, ...(tab === "pos" ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}) }}
             onClick={() => setTab("pos")}>持倉 {data?.positions?.length ?? 0}</button>
+          <button className="btn" style={{ padding: "2px 8px", fontSize: 11, ...(tab === "orders" ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}) }}
+            onClick={() => setTab("orders")}>委託 {data?.pending_orders?.length ?? 0}</button>
           <button className="btn" style={{ padding: "2px 8px", fontSize: 11, ...(tab === "fills" ? { borderColor: "var(--accent)", color: "#8ab4ff" } : {}) }}
             onClick={() => setTab("fills")}>成交明細</button>
           {(data?.pending_orders?.length ?? 0) > 0 && (
@@ -148,6 +150,39 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                 </tr>
               ))}
               {(data?.positions ?? []).length === 0 && <tr><td colSpan={8} className="empty-hint">空手</td></tr>}
+            </tbody>
+          </table>
+        )}
+
+        {tab === "orders" && (
+          <table className="grid" style={{ whiteSpace: "nowrap" }}>
+            <thead><tr><th>#</th><th>決策日</th><th>代碼</th><th>方向</th><th>限價</th><th>股數</th><th>停損/停利</th><th>狀態</th><th>成交</th></tr></thead>
+            <tbody>
+              {(data?.orders ?? []).map((o: any) => {
+                const st: Record<string, [string, string]> = {
+                  pending: ["⏳ 待撮合", "var(--warning)"],
+                  filled: ["✅ 已成交", "var(--down)"],
+                  expired: ["✗ 失效", "var(--text-dim)"],
+                  cancelled: ["✗ 取消", "var(--text-dim)"],
+                };
+                const [label, color] = st[o.status] ?? [o.status, "var(--text-dim)"];
+                return (
+                  <tr key={o.id} onClick={() => onSelect(o.stock_id)} style={{ cursor: "pointer" }}>
+                    <td className="mono" style={{ color: "var(--text-dim)" }}>{o.id}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>{o.created_as_of}</td>
+                    <td><b>{o.stock_id}</b></td>
+                    <td className={o.side === "BUY" ? "up" : "down"}>{o.side === "BUY" ? "買" : "賣"}</td>
+                    <td className="mono">≤{fmt(o.limit_price)}</td>
+                    <td className="mono">{Number(o.shares).toLocaleString()}</td>
+                    <td className="mono" style={{ fontSize: 10 }}>{fmt(o.stop_loss)} / {fmt(o.target)}</td>
+                    <td style={{ color, fontSize: 11 }}>{label}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {o.status === "filled" ? `${o.fill_date ?? ""} @${fmt(o.fill_price)}` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {(data?.orders ?? []).length === 0 && <tr><td colSpan={9} className="empty-hint">尚無委託紀錄</td></tr>}
             </tbody>
           </table>
         )}
