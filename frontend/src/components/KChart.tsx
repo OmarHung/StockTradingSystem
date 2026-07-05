@@ -1,3 +1,4 @@
+import { CandlestickChart } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
@@ -125,7 +126,7 @@ export function KChart({
 
   const pctCls = info?.pct == null ? "" : info.pct > 0 ? "up" : info.pct < 0 ? "down" : "flat";
   return (
-    <Panel title={`K 線圖 · ${stockId}`} icon="📈" sub={`${name} · ${adjusted ? "還原價" : "原始價"}`}
+    <Panel title={`K 線圖 · ${stockId}`} icon={<CandlestickChart size={13} />} sub={`${name} · ${adjusted ? "還原價" : "原始價"}`}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <StarButton active={watched} onToggle={onToggleWatch} size={17} />

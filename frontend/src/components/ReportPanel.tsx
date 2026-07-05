@@ -1,3 +1,4 @@
+import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Panel, fmt } from "./Panel";
@@ -43,7 +44,7 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   };
 
   return (
-    <Panel title="AI 選股報告" icon="🧑‍💼"
+    <Panel title="AI 選股報告" icon={<Bot size={13} />}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />

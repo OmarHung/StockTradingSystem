@@ -1,3 +1,4 @@
+import { Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Quote } from "../api";
 import { Panel, fmt, cls, StarButton } from "./Panel";
@@ -24,7 +25,7 @@ export function Watchlist({
   }, [ids]);
 
   return (
-    <Panel title="自選清單" icon="⭐" sub={`${quotes.length} 檔`}>
+    <Panel title="自選清單" icon={<Star size={13} />} sub={`${quotes.length} 檔`}>
       <table className="grid">
         <thead>
           <tr><th></th><th>代碼</th><th>成交</th><th>漲跌</th><th>幅度</th></tr>

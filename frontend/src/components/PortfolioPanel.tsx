@@ -1,3 +1,4 @@
+import { Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createChart, LineSeries, ColorType, type IChartApi, type Time } from "lightweight-charts";
 import { api } from "../api";
@@ -56,7 +57,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
   const enabled = data?.trading_enabled;
 
   return (
-    <Panel title="持倉績效" icon="💰"
+    <Panel title="持倉績效" icon={<Wallet size={13} />}
       sub={data ? `現金 ${fmt(data.cash, 0)}` : ""}
       right={
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>

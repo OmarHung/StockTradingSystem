@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type ScreenerRow } from "../api";
 import { Panel, fmt, cls, StarButton } from "./Panel";
@@ -46,7 +47,7 @@ export function ScreenerPanel({
   };
 
   return (
-    <Panel title="智慧選股" icon="🔍"
+    <Panel title="智慧選股" icon={<Search size={13} />}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {savedAt && (

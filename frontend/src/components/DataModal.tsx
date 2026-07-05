@@ -1,3 +1,4 @@
+import { Database } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type DataStatus } from "../api";
 
@@ -104,7 +105,7 @@ export function DataModal({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ width: 760 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>📦 資料狀態</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Database size={15} /> 資料狀態</span>
           <span className="close" onClick={onClose}>✕</span>
         </div>
 

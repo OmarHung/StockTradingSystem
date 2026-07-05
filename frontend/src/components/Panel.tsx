@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 export function Panel({
   title, icon, sub, right, children,
 }: {
-  title: string; icon?: string; sub?: string; right?: ReactNode; children: ReactNode;
+  title: string; icon?: ReactNode; sub?: string; right?: ReactNode; children: ReactNode;
 }) {
   return (
     <div className="panel">
       <div className="panel-header panel-drag-handle">
-        {icon && <span className="icon">{icon}</span>}
+        {icon && <span className="icon" style={{ display: "inline-flex", alignItems: "center" }}>{icon}</span>}
         <span>{title}</span>
         {sub && <span className="sub">{sub}</span>}
         <div style={{ flex: 1 }} />

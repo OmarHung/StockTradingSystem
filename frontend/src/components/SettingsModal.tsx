@@ -1,3 +1,4 @@
+import { Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type ModelInfo } from "../api";
 
@@ -122,7 +123,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>⚙️ 系統設定</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Settings size={15} /> 系統設定</span>
           <span className="close" onClick={onClose}>✕</span>
         </div>
         <div className="modal-tabs">

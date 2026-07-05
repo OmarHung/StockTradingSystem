@@ -1,3 +1,4 @@
+import { BrainCircuit } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
@@ -175,7 +176,7 @@ export function BrainPanel() {
   const opened = openKey ? groups.find((g) => g.key === openKey) : undefined;
 
   return (
-    <Panel title="大腦活動" icon="🧠" sub={`${shown.length} 檔股票／${total} 筆`}
+    <Panel title="大腦活動" icon={<BrainCircuit size={13} />} sub={`${shown.length} 檔股票／${total} 筆`}
       right={
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 11, color: "var(--text-dim)", display: "flex", gap: 4, alignItems: "center" }}>

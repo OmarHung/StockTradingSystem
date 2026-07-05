@@ -1,3 +1,4 @@
+import { FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, LineSeries, HistogramSeries, type IChartApi, type Time } from "lightweight-charts";
 import { api } from "../api";
@@ -134,7 +135,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
           {showDetail
             ? <>
                 <button className="btn" style={{ fontSize: 11, marginRight: 8 }} onClick={backToList}>← 返回列表</button>
-                <span>🗂 {picked} {d?.name ?? ""}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><FolderOpen size={15} /> {picked} {d?.name ?? ""}</span>
                 <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-dim)" }}>
                   {d ? `${d.market === "twse" ? "上市" : "上櫃"}・${d.industry}` : ""}
                 </span>
@@ -143,7 +144,7 @@ export function StockBrowserModal({ onClose, onSelect }: {
                   onClick={() => { onSelect(d.stock_id); onClose(); }}>📈 開啟K線</button>}
               </>
             : <>
-                <span>🗂 股票總覽</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><FolderOpen size={15} /> 股票總覽</span>
                 <span style={{ marginLeft: 10, fontSize: 11, color: "var(--text-dim)" }}>
                   共 {rows.length} 檔・符合 {filtered.length} 檔
                 </span>

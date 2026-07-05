@@ -1,3 +1,4 @@
+import { FlaskConical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createChart, LineSeries, ColorType, type IChartApi, type Time } from "lightweight-charts";
 import { api, type BacktestResult } from "../api";
@@ -153,7 +154,7 @@ export function BacktestModal({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ width: 960, maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>🧪 策略回測</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><FlaskConical size={15} /> 策略回測</span>
           <span className="close" onClick={onClose}>✕</span>
         </div>
         <div className="modal-body" style={{ padding: 0, overflow: "auto", maxHeight: "80vh" }}>

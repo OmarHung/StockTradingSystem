@@ -1,3 +1,4 @@
+import { BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Panel, fmt } from "./Panel";
@@ -33,7 +34,7 @@ export function MemoryPanel() {
   };
 
   return (
-    <Panel title="反思規則庫" icon="📚"
+    <Panel title="反思規則庫" icon={<BookOpen size={13} />}
       sub={counts ? `經驗 ${counts.experiences}・規則 ${counts.rules}・被擋 ${counts.blocked}` : ""}
       right={
         <div style={{ display: "flex", gap: 4 }}>

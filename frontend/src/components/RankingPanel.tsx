@@ -1,3 +1,4 @@
+import { Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Panel, fmt, cls } from "./Panel";
@@ -31,7 +32,7 @@ export function RankingPanel({ onSelect }: { onSelect: (id: string) => void }) {
   }, [tab]);
 
   return (
-    <Panel title="排行榜" icon="🏆"
+    <Panel title="排行榜" icon={<Trophy size={13} />}
       right={
         <div style={{ display: "flex", gap: 2 }}>
           {TABS.map((t) => (

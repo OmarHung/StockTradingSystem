@@ -20,7 +20,8 @@ import { MemoryPanel } from "./components/MemoryPanel";
 import { PortfolioPanel } from "./components/PortfolioPanel";
 
 // 預設面板佈局（12 欄）。使用者可拖曳/縮放；把手在標題列。
-// 資料狀態改為頂部按鈕開窗（同設定），騰出版面給大腦活動。
+// 調整結果存 localStorage（LS_LAYOUT_KEY），重新整理不會跑掉；TopBar ↺ 可重置。
+const LS_LAYOUT_KEY = "sts.layout.v1";
 const LAYOUT: Layout = [
   { i: "watchlist", x: 0, y: 0, w: 2, h: 7, minW: 2 },
   { i: "ranking", x: 0, y: 7, w: 2, h: 5, minW: 2 },
@@ -42,6 +43,19 @@ export default function App() {
   const [showBrowser, setShowBrowser] = useState(false);
   const [showBacktest, setShowBacktest] = useState(false);
   const [watchIds, setWatchIds] = useState<string[]>([]);
+  const [layout, setLayout] = useState<Layout>(() => {
+    try {
+      const saved = localStorage.getItem(LS_LAYOUT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Layout;
+        // 面板組成有變（新增/移除面板）→ 佈局過期，回預設
+        const keys = new Set(parsed.map((l) => l.i));
+        if (LAYOUT.every((l) => keys.has(l.i)) && parsed.length === LAYOUT.length) return parsed;
+      }
+    } catch { /* 壞資料回預設 */ }
+    return LAYOUT;
+  });
+  const resetLayout = () => { localStorage.removeItem(LS_LAYOUT_KEY); setLayout([...LAYOUT]); };
 
   const { width, containerRef } = useContainerWidth();
 
@@ -78,7 +92,8 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
         onOpenData={() => setShowData(true)}
         onOpenBrowser={() => setShowBrowser(true)}
-        onOpenBacktest={() => setShowBacktest(true)} />
+        onOpenBacktest={() => setShowBacktest(true)}
+        onResetLayout={resetLayout} />
       {showSettings && <SettingsModal onClose={() => { setShowSettings(false); refreshKey(); }} />}
       {/* 回測視窗常駐掛載（display 切換）：關閉不重置參數/結果/進行中的輪詢 */}
       <div style={{ display: showBacktest ? "contents" : "none" }}>
@@ -89,7 +104,11 @@ export default function App() {
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <GridLayout
           className="layout"
-          layout={LAYOUT}
+          layout={layout}
+          onLayoutChange={(l: Layout) => {
+            setLayout(l);
+            localStorage.setItem(LS_LAYOUT_KEY, JSON.stringify(l));
+          }}
           width={width || 1400}
           gridConfig={{ cols: 12, rowHeight: 48, margin: [8, 8] }}
           dragConfig={{ handle: ".panel-drag-handle" }}
