@@ -42,6 +42,11 @@ def scout_db(tmp_path, monkeypatch):
     class _Cfg:
         db_path = dbfile
 
+        def get(self, key, default=None):
+            if key == "news":
+                return {"scout": {"enabled": True, "max_candidates": 2, "source": "rss"}}
+            return default
+
     monkeypatch.setattr(scout, "get_settings", lambda: _Cfg())
     return dbfile
 
@@ -53,9 +58,27 @@ def test_validate_rejects_hallucinated_id(scout_db):
         ScoutCandidate(stock_id="8342", name="日友環保", theme="國防", reason="長榮航太相關報導"),
         ScoutCandidate(stock_id="6753", name="龍德造船", theme="國防", reason="國艦國造報導"),
     ]
-    out = _validate(cands, "2026-07-05", max_c=3)
+    out, rejects = _validate(cands, "2026-07-05", max_c=3)
     assert [c["stock_id"] for c in out] == ["2634", "6753"]
     assert out[0]["name"] == "漢翔"  # 名稱一致時仍以股票池為準
+    assert len(rejects) == 1 and "8342" in rejects[0] and "益張" in rejects[0]
+
+
+def test_validate_rejects_pair_conflict_in_reason(scout_db):
+    cands = [
+        # reason 提到的 8342 在池內是益張，卻掛「長榮航太」→ 幻覺污染，整檔剔除
+        ScoutCandidate(stock_id="2634", name="漢翔", theme="國防",
+                       reason="國防預算擴編，漢翔（2634）與長榮航太（8342）同列受惠"),
+        # reason 內的配對與池一致（含全形/半形括號、前綴雜訊）→ 保留
+        ScoutCandidate(stock_id="6753", name="龍德造船", theme="國艦國造",
+                       reason="受惠股龍德造船(6753)獲海巡署訂單"),
+        # reason 提到池外代號 → 無從比對，不因此剔除
+        ScoutCandidate(stock_id="8342", name="益張", theme="國防",
+                       reason="與中信造船（2644）同題材"),
+    ]
+    out, rejects = _validate(cands, "2026-07-05", max_c=3)
+    assert [c["stock_id"] for c in out] == ["6753", "8342"]
+    assert len(rejects) == 1
 
 
 def test_validate_dedups_and_rejects_uncertain(scout_db):
@@ -65,5 +88,38 @@ def test_validate_dedups_and_rejects_uncertain(scout_db):
         ScoutCandidate(stock_id="8342", name="益張", theme="國防", reason="代號需確認，暫列於此"),
         ScoutCandidate(stock_id="6753", name="龍德造船", theme="國防", reason="國艦國造報導"),
     ]
-    out = _validate(cands, "2026-07-05", max_c=3)
+    out, rejects = _validate(cands, "2026-07-05", max_c=3)
     assert [c["stock_id"] for c in out] == ["2634", "6753"]
+    assert len(rejects) == 1  # 重複代號不列入回饋（非幻覺），只有自述不確定那檔
+
+
+def test_run_news_scout_retries_on_rejects(scout_db, monkeypatch):
+    """驗證剔除後帶原因重跑：第一輪一檔幻覺被剔，第二輪修正補齊即停。"""
+    from src.agents.scout import ScoutReport
+
+    reports = [
+        ScoutReport(candidates=[
+            ScoutCandidate(stock_id="2634", name="漢翔", theme="國防", reason="軍工報導"),
+            # 幻覺：8342 池內是益張
+            ScoutCandidate(stock_id="8342", name="日友環保", theme="國防", reason="航太報導"),
+        ], summary="第一輪總結"),
+        ScoutReport(candidates=[
+            ScoutCandidate(stock_id="6753", name="龍德造船", theme="國防", reason="國艦國造報導"),
+        ], summary="修正輪總結"),
+    ]
+    prompts: list[str] = []
+
+    def fake_call(model, system, user_prompt, schema, **kw):
+        prompts.append(user_prompt)
+        return reports[len(prompts) - 1]
+
+    monkeypatch.setattr(scout.llm, "call_structured", fake_call)
+    monkeypatch.setattr(scout.llm, "log_note", lambda *a, **k: None)
+    monkeypatch.setattr(scout, "_rss_notes", lambda scfg: ("素材文字", []))
+    monkeypatch.setattr(scout, "_save_snapshot", lambda *a, **k: None)
+
+    out = scout.run_news_scout("2026-07-05")
+    assert [c["stock_id"] for c in out] == ["2634", "6753"]
+    assert len(prompts) == 2  # 一輪初跑 + 一輪修正即收斂
+    assert "驗證回饋" in prompts[1] and "8342" in prompts[1] and "益張" in prompts[1]
+    assert "2634" in prompts[1]  # 已通過的檔會告知不必重列

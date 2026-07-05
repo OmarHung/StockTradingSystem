@@ -26,6 +26,7 @@ log = get_logger(__name__)
 
 _WEB_TOOLS = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8}]
 _MAX_CONTINUATIONS = 5  # pause_turn 續跑上限
+_MAX_VALIDATE_RETRIES = 3  # 驗證剔除後帶原因讓 LLM 修正重跑的上限
 
 
 class ScoutCandidate(BaseModel):
@@ -85,9 +86,35 @@ def run_news_scout(as_of: str) -> list[dict]:
     except Exception as e:  # noqa: BLE001
         log.error("題材候選萃取失敗：%s", e)
         return []
+    summary = rpt.summary
 
-    out = _validate(rpt.candidates, as_of, max_c)
-    _save_snapshot(as_of, used, headlines, rpt.summary, out)
+    # 驗證剔除的候選帶原因回饋 LLM 修正重跑（換代號或換股），最多 _MAX_VALIDATE_RETRIES 次
+    out, rejects = _validate(rpt.candidates, as_of, max_c)
+    for attempt in range(1, _MAX_VALIDATE_RETRIES + 1):
+        if not rejects or len(out) >= max_c:
+            break
+        log.info("scout 驗證剔除 %d 檔，回饋原因重跑（第 %d/%d 次）",
+                 len(rejects), attempt, _MAX_VALIDATE_RETRIES)
+        retry_prompt = (
+            f"{prompt}\n\n【驗證回饋】你上一輪的下列候選未通過市場資料驗證，已被剔除：\n"
+            + "\n".join(f"- {r}" for r in rejects)
+            + "\n請針對這些題材重新確認正確的股票代號與公司名稱後再列出，"
+            "或改列其他你非常確定代號的受惠股；仍不確定的就不要列。"
+            "已通過驗證的檔不必重複列出：" + ("、".join(c["stock_id"] for c in out) or "（無）")
+        )
+        try:
+            rpt = llm.call_structured(
+                model=model, system=system, user_prompt=retry_prompt, schema=ScoutReport,
+                agent="scout", as_of=as_of, max_tokens=3000,
+            )
+        except Exception as e:  # noqa: BLE001 — 重跑失敗就用既有結果
+            log.error("scout 驗證重跑失敗：%s", e)
+            break
+        more, rejects = _validate(rpt.candidates, as_of, max_c - len(out),
+                                  taken={c["stock_id"] for c in out})
+        out.extend(more)
+
+    _save_snapshot(as_of, used, headlines, summary, out)
     if out:
         llm.log_note(
             "scout",
@@ -172,6 +199,8 @@ def _search_policy_news(model: str, as_of: str) -> str:
 
 _UNCERTAIN_PAT = re.compile(r"需確認|待確認|不確定|存疑|不甚確定")
 _NAME_NOISE_PAT = re.compile(r"股份有限公司|控股|-KY|\*|\s")
+# u4e00-u9fff = CJK 漢字區段（一～鿿）——匹配「股名（4碼）」樣式中的中文股名
+_PAIR_PAT = re.compile(r"([\u4e00-\u9fffA-Za-z*\-]{2,10})[（(](\d{4})[）)]")
 
 
 def _name_matches(db_name: str, llm_name: str) -> bool:
@@ -187,43 +216,70 @@ def _name_matches(db_name: str, llm_name: str) -> bool:
     return a in b or b in a
 
 
-def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int) -> list[dict]:
-    """硬性驗證：代號存在於股票池、非 ETF、代號與名稱一致、價格資料足夠深度分析。"""
+def _pair_conflict(text: str, info: dict) -> str | None:
+    """掃描 LLM 原文中的「股名（4碼）」配對，與股票池不符時回傳描述。
+
+    候選欄位驗過了，但 theme/reason 是 LLM 原文、會直接上 WebUI——
+    裡面提到的池內代號若掛錯公司名，同樣是代號幻覺的徵兆。
+    """
+    for m in _PAIR_PAT.finditer(text or ""):
+        llm_name, sid = m.group(1), m.group(2)
+        db_name = (info.get(sid) or ("", ""))[0]
+        if db_name and not _name_matches(db_name, llm_name):
+            return f"「{llm_name}（{sid}）」與股票池「{db_name}」不符"
+    return None
+
+
+def _validate(cands: list[ScoutCandidate], as_of: str, max_c: int,
+              taken: set[str] | None = None) -> tuple[list[dict], list[str]]:
+    """硬性驗證：代號存在於股票池、非 ETF、代號與名稱一致、價格資料足夠深度分析。
+
+    回傳 (通過清單, 剔除原因清單)——剔除原因會回饋給 LLM 重跑修正。
+    taken：前幾輪已入選的代號（重跑時避免重複入選）。
+    """
     cfg = get_settings()
     out: list[dict] = []
-    seen: set[str] = set()
+    seen: set[str] = set(taken or ())
+    rejects: list[str] = []
+
+    def _reject(sid: str, c: ScoutCandidate, why: str, warn: bool = False) -> None:
+        (log.warning if warn else log.info)("scout 候選 %s(%s) %s，略過", sid, c.name, why)
+        rejects.append(f"{sid} {c.name}：{why}")
+
     with db.connect(cfg.db_path) as conn:
         info = {r[0]: (r[1], r[2]) for r in conn.execute(
             "SELECT stock_id, stock_name, type FROM stock_info")}
         for c in cands:
             sid = (c.stock_id or "").strip()
             if len(sid) != 4 or not sid.isdigit() or sid.startswith("00"):
-                log.info("scout 候選 %s(%s) 代號無效/ETF，略過", sid, c.name)
+                _reject(sid, c, "代號無效或為 ETF")
                 continue
             if sid in seen:
                 log.info("scout 候選 %s(%s) 代號重複，略過", sid, c.name)
                 continue
             if sid not in info or info[sid][1] not in ("twse", "tpex"):
-                log.info("scout 候選 %s(%s) 不在上市櫃股票池，略過", sid, c.name)
+                _reject(sid, c, "不在上市櫃股票池")
                 continue
             # LLM 幻覺代號時常掛上另一家公司的名字——代號查得到但名不對，
             # 若照代號覆寫名稱會把幻覺洗白成合法候選，必須整檔剔除。
             if not _name_matches(info[sid][0], c.name):
-                log.warning("scout 候選 %s：LLM 名稱「%s」與股票池「%s」不符，疑似代號幻覺，略過",
-                            sid, c.name, info[sid][0])
+                _reject(sid, c, f"名稱與股票池「{info[sid][0]}」不符，疑似代號幻覺", warn=True)
                 continue
             if _UNCERTAIN_PAT.search(c.reason or ""):
-                log.warning("scout 候選 %s(%s) reason 自述不確定：「%s」，略過",
-                            sid, c.name, c.reason)
+                _reject(sid, c, f"reason 自述不確定：「{c.reason}」", warn=True)
+                continue
+            conflict = _pair_conflict(f"{c.theme or ''} {c.reason or ''}", info)
+            if conflict:
+                _reject(sid, c, f"reason 含幻覺配對：{conflict}", warn=True)
                 continue
             n = conn.execute(
                 "SELECT COUNT(*) FROM price_daily WHERE stock_id=?", (sid,)).fetchone()[0]
             if n < 60:
-                log.info("scout 候選 %s(%s) 價格資料不足（%d 天 <60），略過", sid, c.name, n)
+                _reject(sid, c, f"價格資料不足（{n} 天 <60）")
                 continue
             seen.add(sid)
             out.append({"stock_id": sid, "name": info[sid][0] or c.name,
                         "theme": c.theme, "reason": c.reason})
             if len(out) >= max_c:
                 break
-    return out
+    return out, rejects
