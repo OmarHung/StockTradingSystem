@@ -22,6 +22,7 @@ def get_price(
     start: str | None = None,
     end: str | None = None,
     adjusted: bool = False,
+    include_today: bool = False,
 ) -> pd.DataFrame:
     """取單檔日 K，依日期排序。
 
@@ -29,6 +30,11 @@ def get_price(
     after_price/before_price 為調整係數，事件日之前的價格乘上累積係數，
     使歷史價格與現價可比（動能/均線/回測必用，否則除權息跳空會污染訊號）。
     量能不調整。
+
+    include_today=True（WebUI 行情端點用）：price_daily 還沒有今天的列時
+    （官方日行情收盤後才出），用 kbar_1min 分鐘資料即時合成今天的日 K——
+    盤中是進行中的 bar、收盤後即為完整日 K，之後被官方數字覆蓋。
+    量化（screener/回測）不開此旗標，避免盤中不完整 bar 污染訊號。
     """
     sql = "SELECT * FROM price_daily WHERE stock_id=?"
     params: list = [stock_id]
@@ -39,8 +45,14 @@ def get_price(
         sql += " AND date<=?"
         params.append(end)
     sql += " ORDER BY date"
+    today = dt.date.today().isoformat()
     with db.connect(_db_path()) as conn:
         df = _clean_price(db.read_sql(conn, sql, tuple(params)))
+        if (include_today and (end is None or end >= today)
+                and (df.empty or df["date"].iloc[-1] < today)):
+            live = _today_bar_from_minutes(conn, stock_id, today)
+            if live is not None:
+                df = pd.concat([df, pd.DataFrame([live])], ignore_index=True)
         if not adjusted or df.empty:
             return df
         # 調整事件 = 除權息 ∪ 公司行動（分割/減資，跳空偵測器產生）
@@ -55,6 +67,24 @@ def get_price(
             (stock_id, stock_id),
         )
     return _apply_adjustment(df, div)
+
+
+def _today_bar_from_minutes(conn, stock_id: str, today: str) -> dict | None:
+    """用今天的 1 分 K 合成日 K（volume 張→股）。無分鐘資料回 None。"""
+    m = db.read_sql(
+        conn,
+        "SELECT open, high, low, close, volume FROM kbar_1min "
+        "WHERE stock_id=? AND ts LIKE ? ORDER BY ts",
+        (stock_id, f"{today}%"),
+    )
+    if m.empty:
+        return None
+    return {
+        "stock_id": stock_id, "date": today,
+        "open": float(m["open"].iloc[0]), "high": float(m["high"].max()),
+        "low": float(m["low"].min()), "close": float(m["close"].iloc[-1]),
+        "volume": int(m["volume"].sum()) * 1000,
+    }
 
 
 def _clean_price(df: pd.DataFrame) -> pd.DataFrame:
@@ -91,22 +121,61 @@ def _apply_adjustment(df: pd.DataFrame, div: pd.DataFrame) -> pd.DataFrame:
 
 # ---- 多時間框架（MT5 式：只存日線，週/月即時聚合）----
 def resample_price(df: pd.DataFrame, freq: str) -> pd.DataFrame:
-    """把日 K 聚合成週 K（'W'）或月 K（'M'）。輸入需含 date/open/high/low/close/volume。"""
+    """把日 K 聚合成週 K（'W'）或月 K（'M'）。輸入需含 date/open/high/low/close/volume。
+
+    bar 日期＝該期間「第一個交易日」（TradingView/看盤軟體慣例：本週K標週一、
+    本月K標月初首個交易日）——不能用 pandas 的期末標籤（W-FRI/ME），
+    否則進行中的週/月會標成未來日期（如週五、月底）。
+    """
     if df.empty:
         return df
     x = df.copy()
+    x["day"] = x["date"]                     # 保留原始日期字串，供取期間首個交易日
     x["date"] = pd.to_datetime(x["date"])
     rule = {"W": "W-FRI", "M": "ME"}.get(freq, freq)
     g = x.set_index("date").resample(rule)
     out = pd.DataFrame({
+        "date": g["day"].first(),
         "open": g["open"].first(),
         "high": g["high"].max(),
         "low": g["low"].min(),
         "close": g["close"].last(),
         "volume": g["volume"].sum(),
     }).dropna(subset=["open"])
-    out.index = out.index.strftime("%Y-%m-%d")
-    return out.reset_index().rename(columns={"date": "date", "index": "date"})
+    return out.reset_index(drop=True)
+
+
+# ---- 分鐘 K（kbar_1min；ts＝分鐘「結束」時間，與台股看盤軟體一致）----
+def get_minute_price(stock_id: str, since: str | None = None, tf_min: int = 1) -> pd.DataFrame:
+    """取單檔 1 分 K（可聚合成 5/15/60 分）。回傳欄位 ts/open/high/low/close/volume。
+
+    聚合用 label='right', closed='right'：來源 bar 以結束時間標記，
+    (09:00,09:05] 聚成標記 09:05 的 5 分 K，收盤競價 13:30 歸入該時段尾根。
+    分鐘 K 不做除權息還原（盤中短線用途，與看盤軟體慣例一致）。
+    """
+    sql = ("SELECT ts, open, high, low, close, volume FROM kbar_1min "
+           "WHERE stock_id=?")
+    params: list = [stock_id]
+    if since:
+        sql += " AND ts>=?"
+        params.append(since)
+    sql += " ORDER BY ts"
+    with db.connect(_db_path()) as conn:
+        df = db.read_sql(conn, sql, tuple(params))
+    if df.empty or tf_min <= 1:
+        return df
+    x = df.copy()
+    x["ts"] = pd.to_datetime(x["ts"])
+    g = x.set_index("ts").resample(f"{tf_min}min", label="right", closed="right")
+    out = pd.DataFrame({
+        "open": g["open"].first(),
+        "high": g["high"].max(),
+        "low": g["low"].min(),
+        "close": g["close"].last(),
+        "volume": g["volume"].sum(),
+    }).dropna(subset=["open"]).reset_index()
+    out["ts"] = out["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    return out
 
 
 # ---- 交易日曆（以加權指數 TAIEX 的交易日為準）----

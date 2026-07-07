@@ -9,6 +9,7 @@ export default defineConfig({
   define: { "process.env": {} },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:8000' },
+    // ws: true → /api/ws/* WebSocket（即時 K 線）也走代理
+    proxy: { '/api': { target: 'http://localhost:8000', ws: true } },
   },
 })

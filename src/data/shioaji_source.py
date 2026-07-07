@@ -1,7 +1,12 @@
-"""shioaji（永豐金）備援資料源：FinMind 額度用罄時接手回補股價日 K。
+"""shioaji（永豐金）K 線資料主源：日 K、指數、1 分 K 歷史與即時行情。
 
-核心：`api.daily_quotes(date)` 一次回傳「全市場」當日行情——按日呼叫而非按檔，
-額度效率極高（補 250 個交易日 = 250 次呼叫，涵蓋所有股票）。
+- 個股日 K：`api.daily_quotes(date)` 一次回傳「全市場」當日行情——按日呼叫而非
+  按檔，額度效率極高（補 250 個交易日 = 250 次呼叫，涵蓋所有股票）。
+- 指數日 K（TAIEX/TPEx）：daily_quotes 不含指數，改抓 1 分 K 聚合（fetch_index_daily）。
+- 1 分 K：`api.kbars`（歷史最早 2020-03-02），開圖時 ensure_minute_bars 自動補缺；
+  盤中即時 tick 合成見 src/realtime.py。
+
+FinMind 已完全退出 K 線路徑（額度留給籌碼/基本面資料集）。
 
 需求：.env 設 SJ_API_KEY / SJ_SEC_KEY（永豐 API 金鑰，simulation 登入即可查行情）。
 沒裝套件或沒金鑰時 available() 回 False，呼叫端優雅降級。
@@ -62,6 +67,20 @@ def _login():
     return _api
 
 
+def get_api():
+    """取得已登入的 shioaji api 單例（供即時行情服務 src/realtime.py 使用）。"""
+    return _login()
+
+
+def get_contract(api, stock_id: str):
+    """代號 → shioaji 合約。支援個股/ETF 與指數（TAIEX=加權 001、TPEx=櫃買 101）。"""
+    if stock_id == "TAIEX":
+        return api.Contracts.Indexs.TSE["001"]
+    if stock_id == "TPEx":
+        return api.Contracts.Indexs.OTC["101"]
+    return api.Contracts.Stocks[stock_id]
+
+
 def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
     """抓某交易日全市場行情，篩 wanted_ids 寫入 price_daily。回傳寫入列數。
 
@@ -98,6 +117,117 @@ def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
     for sid in df["stock_id"].unique():
         db.merge_range(conn, "price_daily", sid, date_str, date_str, now)
     return n
+
+
+# ---- 1 分 K（歷史回補；即時合成見 src/realtime.py）----
+# 收盤競價 13:30 撮合完、資料落定約需幾分鐘 → 13:35 後抓到的當日資料視為完整
+_SESSION_SETTLED = "13:35:00"
+KBARS_EARLIEST = "2020-03-02"   # shioaji 歷史 K 線最早日期（股票/指數）
+
+
+def fetch_kbars_df(stock_id: str, start: str, end: str) -> pd.DataFrame:
+    """抓 [start, end] 的 1 分 K（含當日盤中已成交部分）。
+
+    ts 為該分鐘「結束」時間（台股看盤慣例：首根 09:01、收盤競價 13:30，
+    實測 shioaji 原生即此語義，直接沿用不位移）。volume 單位＝張（指數為市場總量）。
+    """
+    api = _login()
+    contract = get_contract(api, stock_id)
+    if contract is None:
+        return pd.DataFrame()
+    kb = api.kbars(contract, start=max(start, KBARS_EARLIEST), end=end)
+    ts = list(getattr(kb, "ts", []) or [])
+    if not ts:
+        return pd.DataFrame()
+    df = pd.DataFrame({
+        "ts": pd.to_datetime(pd.Series(ts)).dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "open": list(kb.Open), "high": list(kb.High),
+        "low": list(kb.Low), "close": list(kb.Close),
+        "volume": pd.to_numeric(pd.Series(list(kb.Volume)), errors="coerce")
+                    .fillna(0).astype("int64"),
+        "amount": list(kb.Amount),
+    })
+    df["stock_id"] = stock_id
+    return df
+
+
+def ensure_minute_bars(conn, stock_id: str, days: int = 30) -> int:
+    """開圖自動回補：把該檔 kbar_1min 補到「現在」，最早回溯 days 天。回傳寫入列數。
+
+    進度記錄 fetch_log(dataset='kbar_1min')，first/last 為日期。「最後一天」永遠
+    重抓（可能只抓到盤中一半）；當日收盤後（13:35）抓過、或 20 秒內剛抓過則跳過，
+    避免面板頻繁重掛時重複打 API。
+    """
+    today = dt.date.today().isoformat()
+    now = dt.datetime.now()
+    want_start = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    first, last = db.get_range(conn, "kbar_1min", stock_id)
+    row = conn.execute(
+        "SELECT updated_at FROM fetch_log WHERE dataset='kbar_1min' AND stock_id=?",
+        (stock_id,)).fetchone()
+    updated_at = (row[0] if row else None) or ""
+
+    segments: list[tuple[str, str]] = []
+    if last is None:
+        segments.append((want_start, today))
+    else:
+        if first and first > want_start:   # 使用者拉長回看範圍 → 往前補歷史
+            segments.append((want_start, first))
+        # settled = 上次抓取時 last 當日已收盤落定（該日資料完整，不必重抓）
+        settled = updated_at >= f"{last}T{_SESSION_SETTLED}"
+        recent = updated_at >= (now - dt.timedelta(seconds=20)).isoformat(timespec="seconds")
+        if last < today:
+            seg_from = ((dt.date.fromisoformat(last) + dt.timedelta(days=1)).isoformat()
+                        if settled else last)
+            segments.append((seg_from, today))
+        elif not (settled or recent):
+            segments.append((last, today))  # 今天已抓過但仍在盤中 → 重抓（upsert 冪等）
+
+    total = 0
+    for seg_start, seg_end in segments:
+        df = fetch_kbars_df(stock_id, seg_start, seg_end)
+        total += db.upsert_dataframe(conn, "kbar_1min", df)
+        db.merge_range(conn, "kbar_1min", stock_id, seg_start, seg_end,
+                       now.isoformat(timespec="seconds"))
+    if total:
+        conn.commit()
+    return total
+
+
+def fetch_index_daily(conn, start: str, end: str) -> int:
+    """指數日 K（TAIEX 加權 / TPEx 櫃買）：抓 1 分 K 按日聚合寫入 price_daily。
+
+    daily_quotes 不含指數，故走 kbars；歷史最早 2020-03-02，更早期間略過
+    （既有資料庫已有舊資料則保留）。分 K Volume 單位為張 → ×1000 存股數，
+    與既有 FinMind 指數列一致（實測 TAIEX 每日 1.5e10 股同量級）。
+    """
+    total = 0
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    for sid in ("TAIEX", "TPEx"):
+        cur = dt.date.fromisoformat(max(start, KBARS_EARLIEST))
+        end_d = dt.date.fromisoformat(end)
+        frames = []
+        while cur <= end_d:  # kbars 範圍查詢分段（一段約一季，避免單次回應過大）
+            seg_end = min(cur + dt.timedelta(days=89), end_d)
+            frames.append(fetch_kbars_df(sid, cur.isoformat(), seg_end.isoformat()))
+            cur = seg_end + dt.timedelta(days=1)
+        m = pd.concat(frames) if frames else pd.DataFrame()
+        if m.empty:
+            continue
+        m["date"] = m["ts"].str[:10]
+        g = m.groupby("date")
+        daily = pd.DataFrame({
+            "open": g["open"].first(), "high": g["high"].max(),
+            "low": g["low"].min(), "close": g["close"].last(),
+            "volume": g["volume"].sum().astype("int64") * 1000,   # 張 → 股
+            "trading_money": g["amount"].sum(),
+        }).reset_index()
+        daily["stock_id"] = sid
+        total += db.upsert_dataframe(conn, "price_daily", daily)
+        db.merge_range(conn, "price_daily", sid,
+                       str(daily["date"].min()), str(daily["date"].max()), now)
+        conn.commit()
+    return total
 
 
 def list_tradable_ids() -> set[str]:

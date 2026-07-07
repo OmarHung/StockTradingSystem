@@ -30,8 +30,8 @@ from src.logging_setup import get_logger, setup_logging
 
 log = get_logger("backfill")
 
+# FinMind 抓取器（僅籌碼/基本面；K 線已全面改 shioaji，見 _shioaji_*_backfill）
 FETCHERS = {
-    "price_daily": fetchers.fetch_price,
     "institutional": fetchers.fetch_institutional,
     "margin": fetchers.fetch_margin,
     "month_revenue": fetchers.fetch_month_revenue,
@@ -43,10 +43,11 @@ DATASET_LABELS = {
     "valuation": "估值(本益比/殖利率/淨值比)",   # 純官方源（BWIBBU_d/peQryDate），無 FinMind 備援
 }
 
-# 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補
+# 大盤指數（市場濾網/相對強弱/交易日曆的基準），一律納入回補；
+# 由 shioaji 指數 1 分 K 聚合日 K（daily_quotes 不含指數）
 INDEX_IDS = ["TAIEX", "TPEx"]
 # 基準 ETF（回測 buy_and_hold/ma_cross 基準）：股票池排除 ETF，但基準價格必須有——
-# 一律納入回補目標；shioaji 按日快照有 ETF（免額外呼叫），FinMind 也保留其價格備援
+# 一律納入回補目標；shioaji 按日快照（daily_quotes）含 ETF，免額外呼叫
 BENCH_IDS = ["0050"]
 
 # 首次回補時，Pass 1「最新」先抓最近這麼多天（其餘留給 Pass 2 歷史）
@@ -148,13 +149,19 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                  "、".join(DATASET_LABELS[k] for k in DATASET_LABELS if k in requested))
         totals = {name: 0 for name in active}
 
-        # 股價主源：shioaji（按交易日全市場、最新優先、流量制額度寬）；
-        # FinMind 只補指數價格與其餘資料集（額度全留給法人/營收/除權息）。
-        sj_primary = "price_daily" in active and shioaji_source.available()
-        if sj_primary:
-            log.info("股價日K 主源＝shioaji（FinMind 額度保留給籌碼/基本面資料）")
-            _shioaji_price_backfill(conn, targets, default_start, end, force=force)
-        if "price_daily" in active or "dividend" in active:
+        # 股價唯一來源：shioaji（按交易日全市場、最新優先、流量制額度寬）。
+        # FinMind 已完全退出 K 線路徑（額度全留給法人/營收/除權息）。
+        if "price_daily" in requested:
+            if shioaji_source.available():
+                _shioaji_index_backfill(conn, default_start, end, force=force)
+                # 限定股票/檔數的回補不可標記日期完成——sj_daily 標記是「全市場
+                # 該日已補」的全域語義，部分回補標了會讓其他股票永遠缺那天
+                _shioaji_price_backfill(conn, targets, default_start, end, force=force,
+                                        mark_dates=not stocks and not limit)
+            else:
+                log.error("股價日K 需要 shioaji（.env 設 SJ_API_KEY / SJ_SEC_KEY）——"
+                          "FinMind 已不再作為 K 線來源，本輪跳過股價回補")
+        if "price_daily" in requested or "dividend" in active:
             # 公司行動偵測（分割/減資跳空 → 還原價事件），股價/除權息更新後執行
             from src.data import corporate_actions
             n_ca = corporate_actions.detect(conn)
@@ -203,13 +210,8 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     break
                 rows_this = 0
                 for name, fn in active.items():
-                    # 指數只有價格資料，其餘 dataset 跳過（省 API 額度）
-                    if sid in INDEX_IDS and name != "price_daily":
-                        continue
-                    # 股價主源=shioaji 時，個股價格不再走 FinMind（指數仍走 FinMind，
-                    # 因 daily_quotes 不含 TAIEX/TPEx）
-                    if (sj_primary and name == "price_daily"
-                            and sid not in INDEX_IDS and sid not in BENCH_IDS):
+                    # 指數只有價格資料（已由 shioaji 處理），FinMind dataset 全跳過
+                    if sid in INDEX_IDS:
                         continue
                     # 官方源已覆蓋該市場的 dataset → FinMind 跳過（備援降級）
                     if name in official_skip and mkt_map.get(sid) in official_skip[name]:
@@ -234,17 +236,6 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     "stock_id": sid, "rows": rows_this,
                 })
 
-        # FinMind 額度用罄 → 若股價尚未由 shioaji 主源處理過，嘗試備援續補
-        if finmind_dead and "price_daily" in active and not sj_primary:
-            if shioaji_source.available():
-                log.info("改用 shioaji 備援續補股價日K（按交易日、最新優先）")
-                _shioaji_price_backfill(conn, targets, default_start, end)
-            else:
-                log.warning(
-                    "shioaji 備援未設定（.env 需 SJ_API_KEY / SJ_SEC_KEY）。"
-                    "已停止回補，FinMind 額度重置後再續補即可（進度已保存）。"
-                )
-
     log.info("回補完成，各 dataset 寫入列數：%s", totals)
     _emit_progress({"pass": "完成", "current": total, "total": total, "stock_id": "", "rows": 0})
 
@@ -259,9 +250,9 @@ def _weekdays_desc(start: str, end: str) -> list[str]:
 def _trading_dates_desc(conn, start: str, end: str) -> list[str]:
     """TAIEX 交易日（新到舊）；無日曆退回平日。
 
-    TAIEX 只能走 FinMind，額度用罄時指數會停更——日曆末端之後的平日
-    必須照樣納入候選，否則 shioaji/官方源全被舊日曆卡住，K 線永遠停在
-    指數最後更新日。非交易日抓到 0 列會被各源正確標記/跳過，多試無害。
+    指數若因故停更，日曆末端之後的平日必須照樣納入候選，否則 shioaji/官方源
+    全被舊日曆卡住，K 線永遠停在指數最後更新日。非交易日抓到 0 列會被各源
+    正確標記/跳過，多試無害。
     """
     cal = [r[0] for r in conn.execute(
         "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
@@ -502,13 +493,35 @@ def _official_dividend_backfill(conn, start: str, end: str) -> dict:
     return counts
 
 
+def _shioaji_index_backfill(conn, start: str, end: str, force: bool = False) -> None:
+    """指數日 K（TAIEX/TPEx）：shioaji 指數 1 分 K 聚合。增量：從已補範圍的
+    「最後一天」重抓到今天——最後一天可能是盤中寫入的不完整日 K，重抓覆蓋。"""
+    seg_start = start
+    if not force:
+        lasts = [db.get_range(conn, "price_daily", sid)[1] for sid in INDEX_IDS]
+        if all(lasts):
+            seg_start = min(lasts)   # 兩指數一起補，取較舊者
+        if seg_start > end:
+            return
+    try:
+        n = shioaji_source.fetch_index_daily(conn, seg_start, end)
+        if n:
+            log.info("指數日K（shioaji）補入 %d 列（%s ~ %s）", n, seg_start, end)
+    except Exception as e:  # noqa: BLE001 — 指數失敗不中斷個股回補
+        log.error("指數日K 回補失敗：%s", e)
+    _emit_progress({"pass": "指數(shioaji)", "current": 1, "total": 1,
+                    "stock_id": "TAIEX/TPEx", "rows": 0})
+
+
 def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
-                            force: bool = False) -> None:
+                            force: bool = False, mark_dates: bool = True) -> None:
     """用 shioaji daily_quotes 按「交易日」補股價（最新優先，一次一天全市場）。
 
     完成進度以 fetch_log(dataset='sj_daily', stock_id=<日期>) 逐日標記——
     中斷安全（重跑只補沒標記的日子），不會產生範圍端點誤蓋缺口的問題。
     休市日（0 列）也標記完成避免每次重掃；「今天且 0 列」不標記（盤後再補）。
+    mark_dates=False（限定股票/檔數的部分回補）：只寫資料不標記，
+    因為標記語義是「全市場該日已補」。
     """
     wanted = {t for t in targets if t not in INDEX_IDS}
     if not wanted:
@@ -538,7 +551,7 @@ def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
                             "stock_id": day, "rows": 0})
             continue
         filled += n
-        if n > 0 or day < today:  # 今天還沒收盤可能 0 列 → 不標記，下次再試
+        if mark_dates and (n > 0 or day < today):  # 今天還沒收盤可能 0 列 → 不標記，下次再試
             db.merge_range(conn, "sj_daily", day, day, day, now)
         conn.commit()
         _emit_progress({"pass": "股價(shioaji)", "current": i + 1, "total": total,

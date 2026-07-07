@@ -33,8 +33,9 @@ export interface Quote {
   stock_id: string; name: string; last: number | null;
   change: number | null; change_pct: number | null; date?: string;
 }
-export interface Candle { time: string; open: number; high: number; low: number; close: number; }
-export interface Vol { time: string; value: number; color: string; }
+// time：日/週/月 K 為 "YYYY-MM-DD"；分鐘 K 為 epoch 秒（台北牆鐘時間當作 UTC）
+export interface Candle { time: string | number; open: number; high: number; low: number; close: number; }
+export interface Vol { time: string | number; value: number; color: string; }
 export interface ScreenerRow {
   rank: number; stock_id: string; stock_name: string; industry_category: string;
   score: number; momentum_20: number; chips_net_buy: number; revenue_yoy: number | null;
@@ -85,6 +86,11 @@ export const api = {
   quote: (id: string) => get<Quote>(`/quote/${id}`),
   price: (id: string, limit = 250, tf = "D", adjusted = true) =>
     get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}&adjusted=${adjusted}`),
+  kbars: (id: string, tf: number, days: number, limit = 500) =>
+    get<{ candles: Candle[]; volume: Vol[] }>(`/kbars/${id}?tf=${tf}&days=${days}&limit=${limit}`),
+  /** 即時 K 線 WebSocket（bar1m＝進行中 1 分 K、day＝今日日 K） */
+  kbarsWs: (id: string) => new WebSocket(
+    `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws/kbars/${id}`),
   indices: () => get<Quote[]>("/indices"),
   stocksOverview: () => get<Record<string, any>[]>("/stocks/overview"),
   stockDetail: (id: string) => get<Record<string, any>>(`/stocks/${id}/detail`),

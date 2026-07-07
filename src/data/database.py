@@ -43,6 +43,22 @@ SCHEMA: dict[str, str] = {
             PRIMARY KEY (stock_id, date)
         )
     """,
+    # 1 分 K 線（shioaji kbars）。ts＝該分鐘「結束」時間（台股看盤慣例：首根 09:01、
+    # 收盤競價 13:30）；volume 單位＝張（指數列為市場總量）。
+    # 歷史：開圖時自動回補（ensure_minute_bars）；盤中：tick 合成即時寫入（src/realtime.py）。
+    "kbar_1min": """
+        CREATE TABLE IF NOT EXISTS kbar_1min (
+            stock_id TEXT NOT NULL,
+            ts       TEXT NOT NULL,     -- 'YYYY-MM-DD HH:MM:SS'
+            open     REAL,
+            high     REAL,
+            low      REAL,
+            close    REAL,
+            volume   INTEGER,           -- 張
+            amount   REAL,              -- 成交金額（元）
+            PRIMARY KEY (stock_id, ts)
+        )
+    """,
     # 三大法人買賣超（每列一個法人別，用 name 區分）
     "institutional": """
         CREATE TABLE IF NOT EXISTS institutional (

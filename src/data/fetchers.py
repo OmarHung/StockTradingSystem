@@ -31,24 +31,7 @@ def fetch_stock_info(client: FinMindClient, conn) -> pd.DataFrame:
     return df
 
 
-# ---- 日 K ----
-_PRICE_MAP = {
-    "max": "high",
-    "min": "low",
-    "Trading_Volume": "volume",
-    "Trading_money": "trading_money",
-    "Trading_turnover": "trading_turnover",
-}
-
-
-def fetch_price(client: FinMindClient, conn, stock_id: str, start: str, end: str) -> int:
-    raw = client.get_dataset("TaiwanStockPrice", data_id=stock_id, start_date=start, end_date=end)
-    if raw.empty:
-        return 0
-    df = raw.rename(columns=_PRICE_MAP)
-    n = db.upsert_dataframe(conn, "price_daily", df)
-    _update_log(conn, "price_daily", stock_id, df["date"])
-    return n
+# ---- 日 K：已全面改 shioaji（src/data/shioaji_source.py），FinMind 不再提供 K 線 ----
 
 
 # ---- 三大法人 ----

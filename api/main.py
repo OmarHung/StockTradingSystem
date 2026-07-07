@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -54,6 +54,13 @@ async def _start_scheduler():
     import asyncio
     from src import scheduler
     asyncio.create_task(scheduler.run_loop())
+
+
+@app.on_event("startup")
+async def _start_realtime():
+    """即時 K 線服務：綁定事件迴圈（券商登入延到首次訂閱才發生）。"""
+    from src import realtime
+    realtime.service.attach_loop()
 
 @app.middleware("http")
 async def _log_requests(request, call_next):
@@ -208,8 +215,20 @@ def ui_layout_reset():
 @app.get("/api/price/{stock_id}")
 def price(stock_id: str, start: str | None = None, end: str | None = None,
           limit: int = 250, tf: str = "D", adjusted: bool = True):
-    """K 線（tf=D/W/M 多時間框架；adjusted=還原價，預設開）。格式對齊 lightweight-charts。"""
-    df = q.get_price(stock_id, start, end, adjusted=adjusted)
+    """K 線（tf=D/W/M 多時間框架；adjusted=還原價，預設開）。格式對齊 lightweight-charts。
+
+    include_today：官方日行情未出時，今天的日 K 由分鐘資料即時合成（盤中跳動）。
+    切換股票時先同步該檔今天的分鐘資料（20 秒節流＋收盤後落定即跳過，不重複打 API），
+    確保任何一檔一點開就是最新 K 棒，不必等排程回補。
+    """
+    from src.data import shioaji_source
+    if shioaji_source.available():
+        try:
+            with db.connect(get_settings().db_path) as conn:
+                shioaji_source.ensure_minute_bars(conn, stock_id, days=3)
+        except Exception as e:  # noqa: BLE001 — 同步失敗仍回庫存資料
+            log.warning("切換同步 %s 分鐘資料失敗（回庫存資料）：%s", stock_id, e)
+    df = q.get_price(stock_id, start, end, adjusted=adjusted, include_today=True)
     if df.empty:
         return {"candles": [], "volume": []}
     if tf in ("W", "M"):
@@ -227,10 +246,78 @@ def price(stock_id: str, start: str | None = None, end: str | None = None,
     return {"candles": candles, "volume": volume}
 
 
+@app.get("/api/kbars/{stock_id}")
+def kbars(stock_id: str, tf: int = 1, days: int = 10, limit: int = 500):
+    """分鐘 K（tf=1/5/15/60）。像看盤軟體：先自動回補缺口（shioaji），再回庫存資料。
+
+    time 為「台北牆鐘時間當作 UTC」的 epoch 秒（前端 lightweight-charts 免時區換算）。
+    """
+    from src.data import shioaji_source
+    from src.realtime import taipei_epoch
+
+    if tf not in (1, 5, 15, 60):
+        raise HTTPException(400, "tf 須為 1/5/15/60（分鐘）")
+    days = max(1, min(days, 120))
+    if shioaji_source.available():
+        try:
+            with db.connect(get_settings().db_path) as conn:
+                shioaji_source.ensure_minute_bars(conn, stock_id, days=days)
+        except Exception as e:  # noqa: BLE001 — 回補失敗仍回庫存資料
+            log.warning("分鐘K自動回補 %s 失敗（回庫存資料）：%s", stock_id, e)
+    import datetime as _dt
+
+    import pandas as pd
+    since = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+    df = q.get_minute_price(stock_id, since=since, tf_min=tf).tail(limit)
+    if df.empty:
+        return {"candles": [], "volume": []}
+    times = [taipei_epoch(t) for t in pd.to_datetime(df["ts"])]
+    candles = [
+        {"time": t, "open": r.open, "high": r.high, "low": r.low, "close": r.close}
+        for t, r in zip(times, df.itertuples())
+    ]
+    volume = [
+        {"time": t, "value": int(r.volume or 0),
+         "color": "#26a69a" if r.close >= r.open else "#ef5350"}
+        for t, r in zip(times, df.itertuples())
+    ]
+    return {"candles": candles, "volume": volume}
+
+
+@app.websocket("/api/ws/kbars/{stock_id}")
+async def ws_kbars(ws: WebSocket, stock_id: str):
+    """盤中即時推播：bar1m（進行中 1 分 K）+ day（今日日 K）。
+
+    前端開圖即連線；首位訂閱者觸發 shioaji tick 訂閱，最後一位離開自動退訂。
+    """
+    import asyncio
+    from src import realtime
+
+    await ws.accept()
+    queue = await realtime.service.register(stock_id)
+
+    async def _send():
+        while True:
+            await ws.send_json(await queue.get())
+
+    send_task = asyncio.create_task(_send())
+    recv_task = asyncio.create_task(ws.receive_text())  # 只為偵測客戶端斷線
+    try:
+        done, pending = await asyncio.wait({send_task, recv_task},
+                                           return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+        for t in done:   # 消化斷線例外，避免 unretrieved exception 警告
+            if not t.cancelled():
+                t.exception()
+    finally:
+        await realtime.service.unregister(stock_id, queue)
+
+
 @app.get("/api/quote/{stock_id}")
 def quote(stock_id: str):
-    """最新報價（收盤基礎；Phase 5 接 shioaji 後改即時）。供自選清單顯示。"""
-    df = q.get_price(stock_id).tail(2)
+    """最新報價（今天有分鐘資料時即時；否則最近收盤）。供自選清單顯示。"""
+    df = q.get_price(stock_id, include_today=True).tail(2)
     names = q.list_stocks()
     name = ""
     row = names[names["stock_id"] == stock_id]
@@ -920,7 +1007,7 @@ def indices():
     """大盤指數報價（TAIEX 加權 / TPEx 櫃買），供頂部狀態列。"""
     out = []
     for sid, label in (("TAIEX", "加權"), ("TPEx", "櫃買")):
-        df = q.get_price(sid).tail(2)
+        df = q.get_price(sid, include_today=True).tail(2)
         if df.empty:
             continue
         last = float(df.iloc[-1]["close"])
