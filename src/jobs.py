@@ -32,6 +32,9 @@ def start_job(name: str, args: list[str]) -> bool:
     if is_running(name):
         return False
     log_path, pid_path = _paths(name)
+    if log_path.exists():
+        # 保留上一輪輸出（含崩潰 traceback）供除錯，否則覆寫後死無對證
+        log_path.replace(log_path.with_suffix(".prev.log"))
     log_f = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         [sys.executable, "-m", *args],

@@ -150,6 +150,19 @@ def format_daily_report(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def send_error_alert(title: str, detail: str = "") -> None:
+    """流程崩潰告警（best effort）：未設定則跳過，發送失敗只記 log。"""
+    if not is_configured():
+        return
+    try:
+        text = f"❌ <b>{html.escape(title)}</b>"
+        if detail:
+            text += f"\n<pre>{html.escape(detail[:1000])}</pre>"
+        send_message(text)
+    except Exception as e:  # noqa: BLE001 — 告警失敗不能再拋，避免蓋掉原始例外
+        log.error("Telegram 告警發送失敗：%s", e)
+
+
 def send_daily_report(summary: dict) -> None:
     """每日流程完成後推送報告。未啟用/未設定則跳過；失敗只記 log。"""
     if not is_configured():

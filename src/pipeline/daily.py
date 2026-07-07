@@ -22,10 +22,16 @@ log = get_logger("daily")
 
 def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
               reflect_weekly: bool = True) -> dict:
-    summary = _run_daily(as_of=as_of, top_n=top_n, decide=decide,
-                         reflect_weekly=reflect_weekly)
-    # 流程收尾：Telegram 每日報告（未設定則跳過；失敗只記 log，不影響交易）
     from src.notify import telegram
+    try:
+        summary = _run_daily(as_of=as_of, top_n=top_n, decide=decide,
+                             reflect_weekly=reflect_weekly)
+    except Exception as e:
+        # 崩潰也要讓人知道：進 log + TG 告警，否則只能靠「沒收到報告」發現
+        log.exception("每日流程失敗")
+        telegram.send_error_alert("每日流程失敗", f"{type(e).__name__}: {e}")
+        raise
+    # 流程收尾：Telegram 每日報告（未設定則跳過；失敗只記 log，不影響交易）
     telegram.send_daily_report(summary)
     return summary
 
@@ -79,7 +85,6 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
         summary["orders"] = []
         return summary
 
-    from src.agents import pipeline as agent_pipeline
     from src.screener.screener import run_screener
 
     ranked = run_screener(as_of)
@@ -108,41 +113,55 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     decisions = []  # 每檔決策明細（含不掛單原因，供每日報告）
     summary["decisions"] = decisions
     for sid in picks:
-        rec = agent_pipeline.analyze_stock(
-            sid, as_of, source="news_scout" if sid in scout_map else "screener")
-        if not rec:
+        # 單檔失敗（如 DB 鎖、LLM 逾時）只跳過該檔，不讓整個每日流程陪葬
+        try:
+            _decide_one(broker, sid, as_of, scout_map, orders, decisions)
+        except Exception as e:  # noqa: BLE001
+            log.exception("決策 %s 失敗（跳過該檔）", sid)
             decisions.append({"stock_id": sid, "action": "error",
-                              "ordered": False, "note": "分析失敗"})
-            continue
-        plan, guard = rec["plan"], rec.get("guard")
-        if plan["action"] == "buy" and guard and guard["approved"] and guard["shares"] > 0:
-            oid = broker.place_buy(
-                as_of=as_of, stock_id=sid, shares=guard["shares"],
-                limit_price=float(plan["entry_high"]),
-                stop_loss=plan.get("stop_loss"), target=plan.get("target_price"),
-                industry=(guard.get("industry") or ""),
-            )
-            if oid is None:
-                log.warning("⛔ 交易已緊急停止（流程中途按下），%s 掛單被拒", sid)
-                decisions.append({"stock_id": sid, "action": plan["action"],
-                                  "confidence": plan.get("confidence"),
-                                  "ordered": False, "note": "緊急停止，掛單被拒"})
-                continue
-            orders.append({"order_id": oid, "stock_id": sid, "shares": guard["shares"],
-                           "limit": plan["entry_high"], "stop": plan.get("stop_loss"),
-                           "target": plan.get("target_price")})
-            decisions.append({"stock_id": sid, "action": plan["action"],
-                              "confidence": plan.get("confidence"),
-                              "ordered": True, "note": None})
-            log.info("掛明日限價單 #%d %s %d 股 @≤%s（損 %s / 標 %s）",
-                     oid, sid, guard["shares"], plan["entry_high"],
-                     plan.get("stop_loss"), plan.get("target_price"))
-        else:
-            reason = plan["action"] if plan["action"] != "buy" else \
-                (guard or {}).get("reject_reason", "guard 未核准")
-            decisions.append({"stock_id": sid, "action": plan["action"],
-                              "confidence": plan.get("confidence"), "ordered": False,
-                              "note": None if plan["action"] != "buy" else reason})
-            log.info("不掛單 %s：%s", sid, reason)
+                              "ordered": False, "note": f"{type(e).__name__}: {e}"})
     summary["orders"] = orders
     return summary
+
+
+def _decide_one(broker: PaperBroker, sid: str, as_of: str, scout_map: dict,
+                orders: list, decisions: list) -> None:
+    """分析單檔 → Guard → 掛單，結果附加到 orders/decisions。"""
+    from src.agents import pipeline as agent_pipeline
+
+    rec = agent_pipeline.analyze_stock(
+        sid, as_of, source="news_scout" if sid in scout_map else "screener")
+    if not rec:
+        decisions.append({"stock_id": sid, "action": "error",
+                          "ordered": False, "note": "分析失敗"})
+        return
+    plan, guard = rec["plan"], rec.get("guard")
+    if plan["action"] == "buy" and guard and guard["approved"] and guard["shares"] > 0:
+        oid = broker.place_buy(
+            as_of=as_of, stock_id=sid, shares=guard["shares"],
+            limit_price=float(plan["entry_high"]),
+            stop_loss=plan.get("stop_loss"), target=plan.get("target_price"),
+            industry=(guard.get("industry") or ""),
+        )
+        if oid is None:
+            log.warning("⛔ 交易已緊急停止（流程中途按下），%s 掛單被拒", sid)
+            decisions.append({"stock_id": sid, "action": plan["action"],
+                              "confidence": plan.get("confidence"),
+                              "ordered": False, "note": "緊急停止，掛單被拒"})
+            return
+        orders.append({"order_id": oid, "stock_id": sid, "shares": guard["shares"],
+                       "limit": plan["entry_high"], "stop": plan.get("stop_loss"),
+                       "target": plan.get("target_price")})
+        decisions.append({"stock_id": sid, "action": plan["action"],
+                          "confidence": plan.get("confidence"),
+                          "ordered": True, "note": None})
+        log.info("掛明日限價單 #%d %s %d 股 @≤%s（損 %s / 標 %s）",
+                 oid, sid, guard["shares"], plan["entry_high"],
+                 plan.get("stop_loss"), plan.get("target_price"))
+    else:
+        reason = plan["action"] if plan["action"] != "buy" else \
+            (guard or {}).get("reject_reason", "guard 未核准")
+        decisions.append({"stock_id": sid, "action": plan["action"],
+                          "confidence": plan.get("confidence"), "ordered": False,
+                          "note": None if plan["action"] != "buy" else reason})
+        log.info("不掛單 %s：%s", sid, reason)

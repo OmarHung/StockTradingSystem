@@ -36,8 +36,13 @@ JOB_DEFS = {
         "label": "每日交易主流程",
         "job_name": "daily",
         "args": ["scripts.run_daily"],
+        # 回補還在跑就延後：避免 SQLite 寫入鎖衝突（曾使流程中途崩潰），
+        # 也確保決策用的是更新完的資料。每 30 秒重試，回補結束即補跑。
+        "wait_for": ["backfill"],
     },
 }
+
+_DEFER_LOGGED: set[tuple[str, str]] = set()  # (job, date) 延後只記一次 log，避免每 30 秒洗版
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS scheduler_runs (
@@ -117,8 +122,18 @@ async def run_loop(interval_sec: int = 30) -> None:
             cfg = _cfg()
             now = dt.datetime.now()
             for name in JOB_DEFS:
-                if name in cfg and _due(name, cfg[name], now):
-                    trigger(name, source="schedule")
+                if name not in cfg or not _due(name, cfg[name], now):
+                    continue
+                blockers = [b for b in JOB_DEFS[name].get("wait_for", [])
+                            if jobs.is_running(b)]
+                if blockers:
+                    key = (name, now.date().isoformat())
+                    if key not in _DEFER_LOGGED:
+                        _DEFER_LOGGED.add(key)
+                        log.info("排程 %s 延後：等待 %s 結束（結束後自動補跑）",
+                                 name, "、".join(blockers))
+                    continue
+                trigger(name, source="schedule")
         except Exception as e:  # noqa: BLE001
             log.error("排程器檢查失敗（下輪重試）：%s", e)
         await asyncio.sleep(interval_sec)
