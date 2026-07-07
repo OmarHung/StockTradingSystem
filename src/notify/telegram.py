@@ -153,7 +153,15 @@ def format_daily_report(summary: dict) -> str:
 def send_daily_report(summary: dict) -> None:
     """每日流程完成後推送報告。未啟用/未設定則跳過；失敗只記 log。"""
     if not is_configured():
-        log.debug("Telegram 通知未啟用，跳過每日報告")
+        # 明確記下缺哪一項，否則「沒收到通知」無從除錯
+        missing = []
+        if not _tg_cfg().get("enabled"):
+            missing.append("settings.yaml notify.telegram.enabled 未開")
+        if not (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip():
+            missing.append("TELEGRAM_BOT_TOKEN 未設定（.env）")
+        if not (os.getenv("TELEGRAM_CHAT_ID") or "").strip():
+            missing.append("TELEGRAM_CHAT_ID 未設定（.env）")
+        log.warning("Telegram 每日報告跳過：%s", "；".join(missing) or "未知原因")
         return
     try:
         send_message(format_daily_report(summary))
