@@ -136,12 +136,25 @@ class Backtester:
             return float(val) if not pd.isna(val) else None
         return None
 
+    def _last_close(self, date: str, sid: str) -> float | None:
+        """date（含）之前最近一筆收盤價；該股完全無資料回 None。"""
+        df = self.prices.get(sid)
+        if df is None or df.empty:
+            return None
+        i = df.index.searchsorted(date, side="right") - 1
+        if i < 0:
+            return None
+        v = df["close"].iloc[i]
+        return float(v) if not pd.isna(v) else None
+
     def _holdings_value(self, date: str, positions: dict[str, int]) -> float:
+        """持股市值。當日停牌/資料未入庫者以最近收盤價估值——
+        估 0 會讓權益曲線出現假暴跌（隔日又彈回），波動率與 MDD 全失真。"""
         total = 0.0
         for sid, sh in positions.items():
-            df = self.prices.get(sid)
-            if df is not None and date in df.index:
-                total += sh * float(df.at[date, "close"])
+            px = self._last_close(date, sid)
+            if px is not None:
+                total += sh * px
         return total
 
     def _rebalance(self, date, cash, positions, targets):
@@ -149,8 +162,9 @@ class Backtester:
         # 以「調倉前」總權益（用當日開盤價估）為基準分配
         open_prices = {sid: self._open_price(date, sid) for sid in set(list(positions) + list(targets))}
         equity = cash + sum(
-            sh * open_prices[sid] for sid, sh in positions.items()
-            if open_prices.get(sid) is not None
+            sh * (open_prices[sid] if open_prices.get(sid) is not None
+                  else (self._last_close(date, sid) or 0.0))
+            for sid, sh in positions.items()
         )
         filled = []
 
