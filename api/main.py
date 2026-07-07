@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 
 from pathlib import Path
 
@@ -32,8 +33,12 @@ from src.data import database as db  # noqa: E402
 from src.data import query as q  # noqa: E402
 from src.llm import client as llm  # noqa: E402
 from src.llm import models as llm_models  # noqa: E402
-from src.logging_setup import get_logger  # noqa: E402
+from src.logging_setup import get_logger, setup_logging  # noqa: E402
 from src.screener.screener import run_screener  # noqa: E402
+
+# API 是 VPS 上的常駐主行程：這裡不初始化的話，API/排程器的 log 只剩 stderr、logs/system.log 不會生成
+_cfg = get_settings()
+setup_logging(_cfg.log_level, _cfg.log_dir)
 
 log = get_logger("api")
 
@@ -49,6 +54,28 @@ async def _start_scheduler():
     import asyncio
     from src import scheduler
     asyncio.create_task(scheduler.run_loop())
+
+@app.middleware("http")
+async def _log_requests(request, call_next):
+    """請求記錄：例外全 traceback、4xx/5xx/慢請求進 system.log（正常請求 DEBUG 級）。"""
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception("%s %s 未捕捉例外", request.method, request.url.path)
+        raise
+    dur_ms = (time.perf_counter() - start) * 1000
+    line = f"{request.method} {request.url.path} -> {response.status_code} ({dur_ms:.0f}ms)"
+    if response.status_code >= 500:
+        log.error(line)
+    elif response.status_code >= 400:
+        log.warning(line)
+    elif dur_ms > 2000:
+        log.info("%s [慢]", line)
+    else:
+        log.debug(line)
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,6 +102,27 @@ def health():
         "broker_env": shioaji_source.current_env(),   # simulation / production
         "broker_ready": shioaji_source.available(),
     }
+
+
+@app.get("/api/logs")
+def logs_tail(name: str = "system", tail: int = 300):
+    """讀取 log 尾端（除錯用）：name=system 或 logs/jobs/ 下的任一 job log。"""
+    cfg = get_settings()
+    files = {"system": cfg.log_dir / "system.log"}
+    jobs_dir = cfg.log_dir / "jobs"
+    if jobs_dir.is_dir():
+        for p in sorted(jobs_dir.glob("*.log")):
+            files[p.stem] = p
+    if name not in files:
+        raise HTTPException(404, f"log 不存在，可用：{', '.join(files)}")
+    path = files[name]
+    if not path.exists():
+        return {"name": name, "available": sorted(files), "lines": []}
+    tail = max(1, min(tail, 5000))
+    with path.open(encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()[-tail:]
+    return {"name": name, "available": sorted(files),
+            "path": str(path), "lines": [ln.rstrip("\n") for ln in lines]}
 
 
 @app.get("/api/models")

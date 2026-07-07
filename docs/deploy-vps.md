@@ -156,7 +156,35 @@ sudo systemctl restart trading
 
 （`market.db` 可隨時重新回補，`chroma` 的交易經驗與反思規則不可再生，優先保。）
 
-## 8. 疑難排解
+## 8. 收集除錯資訊（丟給 Claude 用）
+
+Log 有兩層，除錯時兩個都抓：
+
+- **journald**：uvicorn 啟動訊息、存取記錄、崩潰時的 stderr。
+- **`logs/system.log`**：應用層 log（排程、選股、LLM、回補），含毫秒時間戳、自動輪替（10MB×5）；未捕捉例外的完整 traceback 也在這。API 錯誤（4xx/5xx）與慢請求會標記進來。
+- **`logs/jobs/*.log`**：各背景任務（daily/backfill/intraday/backtest）子行程的完整輸出。
+
+一鍵打包（在 VPS 上跑，產出單一檔案丟給 Claude）：
+
+```bash
+cd ~/StockTradingSystem
+{ echo "=== journalctl (最近 200 行) ==="; journalctl -u trading -n 200 --no-pager
+  echo; echo "=== system.log (最近 300 行) ==="; tail -300 logs/system.log
+  for f in logs/jobs/*.log; do echo; echo "=== $f (最近 100 行) ==="; tail -100 "$f"; done
+} > /tmp/trading-debug.txt
+```
+
+再從本機拉回：`scp trading:/tmp/trading-debug.txt .`
+
+不想 SSH 的話，透過 tunnel 直接用 API 撈（`name` 可為 `system` 或任一 job 名）：
+
+```bash
+curl -s 'localhost:8000/api/logs?name=system&tail=300' | python3 -m json.tool
+```
+
+想看更細的 log（含每個 API 請求）：WebUI 設定或 `config/settings.yaml` 把 `logging.level` 改成 `DEBUG` 後重啟。
+
+## 9. 疑難排解
 
 - **WebUI 開不起來**：`journalctl -u trading -n 100`；確認 `frontend/dist` 存在（沒 build 就只有 `/api/*` 能用）。
 - **排程沒跑**：`date` 確認時區；WebUI 設定 → 排程 檢查啟用狀態；`/api/scheduler/status`。
