@@ -98,7 +98,10 @@ scheduler:
     time: "09:00"                  # 盤中停損監控（開盤啟動，收盤/無持倉自行結束）
   dataupdate:
     enabled: true
-    time: "14:30"                  # 平日盤後資料增量更新（HH:MM，24h制）
+    time: "14:30"                  # 平日盤後價格更新（只拉日K；決策唯一必須 T 日的資料）
   daily:
     enabled: true
     time: "15:00"                  # 平日交易主流程（撮合→風控→決策→掛單）
+  nightly:
+    enabled: true
+    time: "17:30"                  # 夜間資料補全（法人/融資券/營收/除權息/估值；16:00 後才發布）

@@ -28,8 +28,18 @@ JOB_DEFS = {
         "args": ["scripts.intraday_monitor"],   # 09:00 啟動，收盤/無持倉自行結束
     },
     "dataupdate": {
-        "label": "資料增量更新",
+        "label": "盤後價格更新",
         "job_name": "backfill",                      # 與 WebUI 資料視窗共用監控
+        # 只拉股價日K（shioaji 單路徑，不吃 FinMind 額度、幾分鐘完成）——
+        # 盤後決策唯一硬相依的 T 日資料。不帶 --auto-wait：價格路徑不走 FinMind，
+        # 帶了反而會在 stock_info 額度用罄時空等整點。
+        "args": ["scripts.backfill", "--datasets", "price_daily"],
+    },
+    "nightly": {
+        "label": "夜間資料補全",
+        "job_name": "backfill",
+        # 法人/融資券/估值 T 日資料約 16:00 後才發布，14:30 拉必定落空；
+        # 移到晚上一次補全（決策容忍這些資料 T-1，見 daily.py 新鮮度閘門）。
         "args": ["scripts.backfill", "--auto-wait"],
     },
     "daily": {

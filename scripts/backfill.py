@@ -202,6 +202,8 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         # 股票 → 市場對照（官方源跳過判斷用）
         mkt_map = {r[0]: r[1] for r in conn.execute("SELECT stock_id, type FROM stock_info")}
 
+        if not active:
+            passes = []  # 純價格/估值更新：無 FinMind dataset，跳過逐檔迴圈
         for pass_label, gap_fn in passes:
             if finmind_dead:
                 break

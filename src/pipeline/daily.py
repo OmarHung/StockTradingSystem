@@ -42,6 +42,15 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     broker = PaperBroker()
     summary: dict = {"as_of": as_of}
 
+    # 資料新鮮度閘門：決策唯一硬相依的 T 日資料是股價日K。
+    # 未達 as_of 就等待進行中的回補或立即觸發價格更新；仍不新鮮 →
+    # 保護性步驟（撮合/停損/快照）照跑，但跳過決策（寧可不交易，不用舊價格交易）。
+    data_fresh, fresh_note = _ensure_price_fresh(as_of)
+    summary["data_fresh"] = data_fresh
+    if not data_fresh:
+        summary["data_note"] = fresh_note
+        log.warning("價格資料未更新到 %s：%s", as_of, fresh_note)
+
     # ① 開盤撮合昨日委託
     fills = broker.execute_pending(as_of)
     summary["morning_fills"] = fills
@@ -84,6 +93,14 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
         log.warning("⛔ 交易已緊急停止（trading_enabled=false），跳過決策與掛單")
         summary["orders"] = []
         return summary
+    if not data_fresh:
+        from src.notify import telegram
+        log.warning("⛔ 價格資料未達 %s（%s），跳過決策與掛單", as_of, fresh_note)
+        telegram.send_error_alert(
+            "盤後決策跳過：價格資料未更新",
+            f"as_of={as_of}：{fresh_note}\n保護性步驟（撮合/停損/快照）已照常執行。")
+        summary["orders"] = []
+        return summary
 
     from src.screener.screener import run_screener
 
@@ -122,6 +139,49 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
                               "ordered": False, "note": f"{type(e).__name__}: {e}"})
     summary["orders"] = orders
     return summary
+
+
+def _ensure_price_fresh(as_of: str, wait_minutes: int = 30) -> tuple[bool, str]:
+    """盤後決策的資料新鮮度閘門：price_daily 必須有 as_of 當日資料（以 TAIEX 為準）。
+
+    不新鮮時依序：① 回補 job 進行中 → 等它結束複查（避免 SQLite 鎖衝突與重複拉取）；
+    ② 立即執行價格增量更新（shioaji 單路徑，不吃 FinMind 額度）後複查。
+    回傳 (是否新鮮, 說明)。歷史日期重放（as_of < 最新資料日）直接視為新鮮。
+    """
+    import time
+
+    from src import jobs
+    from src.config import get_settings
+    from src.data import database as db
+
+    def _latest() -> str:
+        with db.connect(get_settings().db_path) as conn:
+            r = conn.execute(
+                "SELECT MAX(date) FROM price_daily WHERE stock_id='TAIEX'").fetchone()
+        return (r[0] if r else None) or ""
+
+    if _latest() >= as_of:
+        return True, "已是最新"
+
+    waited = 0
+    while jobs.is_running("backfill") and waited < wait_minutes * 60:
+        if waited == 0:
+            log.info("價格資料未達 %s，回補進行中——等待完成後複查", as_of)
+        time.sleep(20)
+        waited += 20
+    if _latest() >= as_of:
+        return True, "等待回補完成後已最新"
+
+    log.warning("價格資料未達 %s，立即執行價格增量更新（shioaji）", as_of)
+    try:
+        from scripts.backfill import backfill
+        backfill(stocks=None, start=None, end=None, limit=None,
+                 datasets=["price_daily"])
+    except Exception as e:  # noqa: BLE001 — 更新失敗交由呼叫端決定跳過決策
+        return False, f"價格即時更新失敗：{type(e).__name__}: {e}"
+    if _latest() >= as_of:
+        return True, "已即時更新"
+    return False, "更新後仍無當日價格（可能為休市日，或行情源尚未發布）"
 
 
 def _decide_one(broker: PaperBroker, sid: str, as_of: str, scout_map: dict,
