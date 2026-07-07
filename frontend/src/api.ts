@@ -38,7 +38,8 @@ export interface Candle { time: string | number; open: number; high: number; low
 export interface Vol { time: string | number; value: number; color: string; }
 export interface ScreenerRow {
   rank: number; stock_id: string; stock_name: string; industry_category: string;
-  score: number; momentum_20: number; chips_net_buy: number; revenue_yoy: number | null;
+  score: number; change_pct: number | null; momentum_20: number;
+  volume_surge: number | null; chips_net_buy: number; revenue_yoy: number | null;
 }
 export interface SavedScreener {
   as_of: string; rows: ScreenerRow[]; top_n: number | null; created_at: string;

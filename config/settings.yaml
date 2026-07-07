@@ -20,20 +20,25 @@ universe:
   include_etf: false               # 是否納入 ETF
   min_stock_id_len: 4              # 一般普通股代號為 4 碼
 
-# ---- 選股 Screener（Phase 1）----
+# ---- 選股 Screener（量化＋新聞雙軌之量化側；業界式漏斗）----
+# 全市場 → 流動性門檻過濾 → 多因子 z-score 加權 → Top N → LLM 深度分析
 screener:
-  top_n: 30                        # 最終選出檔數
-  min_avg_turnover: 20000000       # 20 日均成交額下限（元），濾除低流動性
+  universe: all                    # all=全市場+流動性門檻（業界式，預設） / volume_top=只看成交量前N高
+  volume_top_n: 10                 # universe=volume_top 時的排行檔數
+  top_n: 30                        # 量化初篩選出檔數（每日流程再從中取 daily.top_n 檔進 LLM）
+  min_avg_turnover: 20000000       # 流動性門檻：20 日均成交額下限（元），濾除買不進賣不出的
   momentum_lookback:               # 動能回看天數
     - 20
     - 60
   chips_lookback: 20               # 籌碼（法人淨買）回看天數
   weights:                         # 因子權重（會正規化；正值代表越高越好）
-    momentum_20: 1
+    momentum_20: 1                 # 中期動能（學術實證最強的因子之一）
     momentum_60: 0.8
-    chips_net_buy: 1.2
-    revenue_yoy: 1
-    above_ma60: 0.5
+    chips_net_buy: 1.2             # 法人買賣超（外資+投信淨買，台股在地優勢）
+    volume_surge: 0.8              # 爆量倍數（今日量/20日均量）——量能異常放大
+    revenue_yoy: 1                 # 月營收年增率（基本面成長）
+    above_ma60: 0.5                # 趨勢濾網（站上季線）
+    change_pct: 0.3                # 當日漲跌幅（單日噪音大，權重低）
 capital:
   total: 1000000                   # 總資金（TWD）
 risk:
@@ -58,17 +63,19 @@ llm:
 news:
   lookback_days: 10                # 判讀基準日往前抓幾天的新聞
   max_items: 20                    # 餵給 LLM 的新聞上限（新到舊截取）
-  scout:                           # 政策題材偵察：掃政策新聞，把題材股補進候選池
+  scout:                           # 關鍵新聞偵察：掃市場關鍵新聞，把新聞驅動的個股補進候選池
     enabled: true
     source: rss                    # rss=免費新聞RSS關鍵字(預設) / web=Claude web search（RSS全掛時自動備援）
     max_candidates: 5              # 每日最多補幾檔（額外名額，不佔量化 top_n）
     keywords:                      # Google News 搜尋關鍵字（可自行增減）
-      - 政策 台股
-      - 補助 產業
-      - 行政院 預算
+      - 台股 利多
+      - 政策 補助 產業
+      - 接單 台廠
+      - 擴產 投資 台股
+      - 併購 台股
       - 國防 軍工
       - 電網 台電
-      - 法規 鬆綁
+      - AI 供應鏈 台股
 
 # ---- 日誌 ----
 logging:

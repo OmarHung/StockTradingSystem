@@ -65,6 +65,21 @@ def compute_factors(
 
         row = {"stock_id": sid, "close": last_close, "avg_turnover": avg_turnover}
 
+        # 當日漲跌幅（前一日收盤為 0/缺值時視為缺值，避免除零）
+        if len(close) >= 2 and close[-2] > 0 and not np.isnan(close[-2]):
+            row["change_pct"] = last_close / close[-2] - 1.0
+        else:
+            row["change_pct"] = np.nan
+
+        # 爆量倍數：今日量 / 前 20 日均量（不含今日，避免自我稀釋）。
+        # 比絕對成交量更有資訊量——捕捉「量能異常放大」而非「本來就大」。
+        vol = p["volume"].to_numpy(dtype=float)
+        if len(vol) >= 21:
+            base = np.nanmean(vol[-21:-1])
+            row["volume_surge"] = vol[-1] / base if base > 0 else np.nan
+        else:
+            row["volume_surge"] = np.nan
+
         # 動能：N 日報酬率（過去價為 0/NaN 時視為缺值，避免除零）
         for n in momentum_lookback:
             if len(close) > n and close[-n - 1] > 0 and not np.isnan(close[-n - 1]):

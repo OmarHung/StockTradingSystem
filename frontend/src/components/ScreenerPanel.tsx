@@ -92,7 +92,7 @@ export function ScreenerPanel({
       ) : (
         <table className="grid">
           <thead>
-            <tr><th></th><th>#</th><th>代碼</th><th>股名</th><th>綜合分</th><th>動能20</th><th>法人淨買</th><th>營收YoY</th></tr>
+            <tr><th></th><th>#</th><th>代碼</th><th>股名</th><th>綜合分</th><th>漲跌幅</th><th>動能20</th><th>爆量</th><th>法人淨買</th><th>營收YoY</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
@@ -104,12 +104,14 @@ export function ScreenerPanel({
                 <td><b>{r.stock_id}</b></td>
                 <td>{r.stock_name}</td>
                 <td className="mono">{fmt(r.score, 3)}</td>
+                <td className={`mono ${cls(r.change_pct)}`}>{r.change_pct != null ? fmt(r.change_pct * 100, 2) + "%" : "—"}</td>
                 <td className={`mono ${cls(r.momentum_20)}`}>{fmt(r.momentum_20 * 100, 1)}%</td>
+                <td className="mono">{r.volume_surge != null ? fmt(r.volume_surge, 1) + "x" : "—"}</td>
                 <td className={`mono ${cls(r.chips_net_buy)}`}>{fmt(r.chips_net_buy, 0)}</td>
                 <td className={`mono ${cls(r.revenue_yoy)}`}>{r.revenue_yoy != null ? fmt(r.revenue_yoy * 100, 1) + "%" : "—"}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={8} className="empty-hint">選日期後按「執行」</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={10} className="empty-hint">選日期後按「執行」</td></tr>}
           </tbody>
         </table>
       )}

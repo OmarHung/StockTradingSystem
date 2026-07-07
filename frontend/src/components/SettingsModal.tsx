@@ -164,6 +164,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div className="form-hint">
               每日流程從量化排行取前 N 檔進 AI 決策（排程/手動皆用此值；成本 ≈ N × 5 次 LLM 呼叫）。改動即存。
             </div>
+            <div className="form-row">
+              <label>量化股票池</label>
+              <select value={cfg.screener?.universe ?? "all"}
+                onChange={(e) => setField("screener", "universe", e.target.value)}>
+                <option value="all">全市場＋流動性門檻（業界式）</option>
+                <option value="volume_top">成交量前 N 高</option>
+              </select>
+            </div>
+            <NumRow label="成交量排行檔數" value={cfg.screener?.volume_top_n} onChange={(v) => setField("screener", "volume_top_n", v)} />
+            <div className="form-hint">
+              業界式漏斗：全市場以「均成交額門檻」濾除低流動性後，用動能、法人買賣超、爆量倍數等因子加權排名；
+              「成交量前 N 高」為只看熱門股的備用模式。
+            </div>
             <NumRow label="選出檔數 Top N" value={cfg.screener?.top_n} onChange={(v) => setField("screener", "top_n", v)} />
             <NumRow label="20日均成交額下限 (元)" money value={cfg.screener?.min_avg_turnover} onChange={(v) => setField("screener", "min_avg_turnover", v)} />
             <NumRow label="籌碼回看天數" value={cfg.screener?.chips_lookback} onChange={(v) => setField("screener", "chips_lookback", v)} />
@@ -182,7 +195,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div className="form-hint" style={{ margin: 0 }}>
               清單為 Claude 最新前 5 個模型（即時查詢）。⚡ 表示支援思考模式；ctx 為上下文上限、out 為輸出上限。
               交易員/反思建議選支援思考的模型；不支援思考者系統會自動關閉思考參數。
-              題材判讀用於政策新聞掃描（scout），新聞來源設為 web search 時需選支援 web_search 工具的模型。
+              題材判讀用於關鍵新聞掃描（scout），新聞來源設為 web search 時需選支援 web_search 工具的模型。
             </div>
 
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 14 }}>

@@ -409,6 +409,31 @@ def all_stock_ids() -> list[str]:
     return df["stock_id"].tolist()
 
 
+def top_volume_ids(as_of: str, n: int = 10) -> list[str]:
+    """as_of 當日（或之前最近交易日）成交量（股數）前 n 高的個股代號。
+
+    量化選股的股票池：排除指數、ETF（00 開頭）、非上市櫃與已下市者。
+    """
+    with db.connect(_db_path()) as conn:
+        row = conn.execute(
+            "SELECT MAX(date) FROM price_daily "
+            "WHERE date<=? AND stock_id NOT IN ('TAIEX','TPEx')", (as_of,)).fetchone()
+        trade_date = row[0] if row else None
+        if not trade_date:
+            return []
+        df = db.read_sql(
+            conn,
+            "SELECT p.stock_id FROM price_daily p "
+            "JOIN stock_info s ON s.stock_id = p.stock_id "
+            "WHERE p.date=? AND s.type IN ('twse','tpex') "
+            "AND COALESCE(s.delisted,0)=0 "
+            "AND p.stock_id GLOB '[0-9][0-9][0-9][0-9]' AND p.stock_id NOT LIKE '00%' "
+            "ORDER BY p.volume DESC LIMIT ?",
+            (trade_date, n),
+        )
+    return df["stock_id"].tolist()
+
+
 def list_stocks() -> pd.DataFrame:
     with db.connect(_db_path()) as conn:
         return db.read_sql(

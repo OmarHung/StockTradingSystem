@@ -95,7 +95,7 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     picks = [s for s in ranked["stock_id"].head(top_n * 2).tolist() if s not in held][:top_n]
     log.info("盤後決策候選：%s", picks)
 
-    # 政策題材偵察：新聞先行的候選股（額外名額，不佔量化 top_n；失敗不影響主流程）
+    # 關鍵新聞偵察：新聞先行的候選股（額外名額，不佔量化 top_n；失敗不影響主流程）
     scout_map: dict[str, dict] = {}
     try:
         from src.agents import scout as news_scout
@@ -105,9 +105,9 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
                 scout_map[c["stock_id"]] = c
         if scout_map:
             summary["scout"] = list(scout_map.values())
-            log.info("政策題材候選：%s", [f"{s} {c['theme']}" for s, c in scout_map.items()])
+            log.info("關鍵新聞候選：%s", [f"{s} {c['theme']}" for s, c in scout_map.items()])
     except Exception as e:  # noqa: BLE001
-        log.error("政策題材偵察失敗（不影響量化候選）：%s", e)
+        log.error("關鍵新聞偵察失敗（不影響量化候選）：%s", e)
 
     orders = []
     decisions = []  # 每檔決策明細（含不掛單原因，供每日報告）
