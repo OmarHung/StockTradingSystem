@@ -249,17 +249,28 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
     _emit_progress({"pass": "完成", "current": total, "total": total, "stock_id": "", "rows": 0})
 
 
-def _trading_dates_desc(conn, start: str, end: str) -> list[str]:
-    """TAIEX 交易日（新到舊）；無日曆退回平日。"""
-    cal = [r[0] for r in conn.execute(
-        "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
-        (start, end)).fetchall()]
-    if cal:
-        return cal
+def _weekdays_desc(start: str, end: str) -> list[str]:
     d0, d1 = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     return [d.isoformat() for d in
             (d1 - dt.timedelta(days=i) for i in range((d1 - d0).days + 1))
             if d.weekday() < 5]
+
+
+def _trading_dates_desc(conn, start: str, end: str) -> list[str]:
+    """TAIEX 交易日（新到舊）；無日曆退回平日。
+
+    TAIEX 只能走 FinMind，額度用罄時指數會停更——日曆末端之後的平日
+    必須照樣納入候選，否則 shioaji/官方源全被舊日曆卡住，K 線永遠停在
+    指數最後更新日。非交易日抓到 0 列會被各源正確標記/跳過，多試無害。
+    """
+    cal = [r[0] for r in conn.execute(
+        "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
+        (start, end)).fetchall()]
+    if not cal:
+        return _weekdays_desc(start, end)
+    if cal[0] < end:
+        cal = _weekdays_desc(_shift(cal[0], 1), end) + cal
+    return cal
 
 
 def _official_chips_backfill(conn, start: str, end: str, force: bool = False) -> dict:
@@ -504,15 +515,8 @@ def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
         return
     today = dt.date.today().isoformat()
 
-    # 候選日期：TAIEX 交易日曆（新到舊）；沒有日曆就用平日
-    cal = [r[0] for r in conn.execute(
-        "SELECT date FROM price_daily WHERE stock_id='TAIEX' AND date>=? AND date<=? ORDER BY date DESC",
-        (start, end)).fetchall()]
-    if not cal:
-        d0, d1 = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
-        cal = [d.isoformat() for d in
-               (d1 - dt.timedelta(days=i) for i in range((d1 - d0).days + 1))
-               if d.weekday() < 5]
+    # 候選日期：TAIEX 交易日曆（新到舊；含日曆停更後的平日，見 _trading_dates_desc）
+    cal = _trading_dates_desc(conn, start, end)
 
     done: set[str] = set() if force else {
         r[0] for r in conn.execute(
