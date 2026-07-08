@@ -135,11 +135,12 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
 
         {tab === "pos" && (
           <table className="grid">
-            <thead><tr><th>代碼</th><th>股數</th><th>成本</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>停損/停利</th></tr></thead>
+            <thead><tr><th>代碼</th><th>名稱</th><th>股數</th><th>成本</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>停損/停利</th></tr></thead>
             <tbody>
               {(data?.positions ?? []).map((p: any) => (
                 <tr key={p.stock_id} onClick={() => onSelect(p.stock_id)} style={{ cursor: "pointer" }}>
                   <td><b>{p.stock_id}</b></td>
+                  <td>{p.name}</td>
                   <td className="mono">{Number(p.shares).toLocaleString()}</td>
                   <td className="mono">{fmt(p.avg_cost)}</td>
                   <td className="mono">{fmt(p.last)}</td>
@@ -149,14 +150,14 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                   <td className="mono" style={{ fontSize: 10 }}>{fmt(p.stop_loss)} / {fmt(p.target)}</td>
                 </tr>
               ))}
-              {(data?.positions ?? []).length === 0 && <tr><td colSpan={8} className="empty-hint">空手</td></tr>}
+              {(data?.positions ?? []).length === 0 && <tr><td colSpan={9} className="empty-hint">空手</td></tr>}
             </tbody>
           </table>
         )}
 
         {tab === "orders" && (
           <table className="grid" style={{ whiteSpace: "nowrap" }}>
-            <thead><tr><th>#</th><th>決策日</th><th>代碼</th><th>方向</th><th>限價</th><th>股數</th><th>停損/停利</th><th>狀態</th><th>成交</th></tr></thead>
+            <thead><tr><th>#</th><th>決策日</th><th>代碼</th><th>名稱</th><th>方向</th><th>限價</th><th>股數</th><th>停損/停利</th><th>狀態</th><th>成交</th></tr></thead>
             <tbody>
               {(data?.orders ?? []).map((o: any) => {
                 const st: Record<string, [string, string]> = {
@@ -171,6 +172,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                     <td className="mono" style={{ color: "var(--text-dim)" }}>{o.id}</td>
                     <td className="mono" style={{ fontSize: 11 }}>{o.created_as_of}</td>
                     <td><b>{o.stock_id}</b></td>
+                    <td>{o.name}</td>
                     <td className={o.side === "BUY" ? "up" : "down"}>{o.side === "BUY" ? "買" : "賣"}</td>
                     <td className="mono">≤{fmt(o.limit_price)}</td>
                     <td className="mono">{Number(o.shares).toLocaleString()}</td>
@@ -182,19 +184,20 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                   </tr>
                 );
               })}
-              {(data?.orders ?? []).length === 0 && <tr><td colSpan={9} className="empty-hint">尚無委託紀錄</td></tr>}
+              {(data?.orders ?? []).length === 0 && <tr><td colSpan={10} className="empty-hint">尚無委託紀錄</td></tr>}
             </tbody>
           </table>
         )}
 
         {tab === "fills" && (
           <table className="grid">
-            <thead><tr><th>日期</th><th>代碼</th><th>方向</th><th>股數</th><th>價格</th><th>損益</th><th>原因</th></tr></thead>
+            <thead><tr><th>日期</th><th>代碼</th><th>名稱</th><th>方向</th><th>股數</th><th>價格</th><th>損益</th><th>原因</th></tr></thead>
             <tbody>
               {(data?.fills ?? []).map((f: any) => (
                 <tr key={f.id}>
                   <td style={{ fontSize: 11 }}>{f.date}</td>
                   <td>{f.stock_id}</td>
+                  <td>{f.name}</td>
                   <td className={f.side === "BUY" ? "up" : "down"}>{f.side === "BUY" ? "買" : "賣"}</td>
                   <td className="mono">{Number(f.shares).toLocaleString()}</td>
                   <td className="mono">{fmt(f.price)}</td>
@@ -202,7 +205,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                   <td style={{ fontSize: 10 }}>{{ entry: "進場", stop: "停損", target: "停利", manual: "手動" }[f.reason as string] ?? f.reason}</td>
                 </tr>
               ))}
-              {(data?.fills ?? []).length === 0 && <tr><td colSpan={7} className="empty-hint">尚無成交</td></tr>}
+              {(data?.fills ?? []).length === 0 && <tr><td colSpan={8} className="empty-hint">尚無成交</td></tr>}
             </tbody>
           </table>
         )}

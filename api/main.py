@@ -722,6 +722,12 @@ def portfolio():
     from src.report.performance import performance_summary
 
     broker = PaperBroker()
+    names = q.list_stocks()
+    name_map = dict(zip(names["stock_id"], names["stock_name"])) if not names.empty else {}
+
+    def _with_name(recs: list[dict]) -> list[dict]:
+        return [{**r, "name": name_map.get(r.get("stock_id"), "")} for r in recs]
+
     pos = broker.positions()
     rows = []
     for r in pos.to_dict(orient="records"):
@@ -729,16 +735,17 @@ def portfolio():
         last = float(px["close"].iloc[-1]) if not px.empty else r["avg_cost"]
         mv = r["shares"] * last
         cost = r["shares"] * r["avg_cost"]
-        rows.append({**r, "last": last, "market_value": round(mv, 0),
+        rows.append({**r, "name": name_map.get(r["stock_id"], ""),
+                     "last": last, "market_value": round(mv, 0),
                      "unrealized_pnl": round(mv - cost, 0),
                      "unrealized_pct": round((last / r["avg_cost"] - 1) * 100, 2) if r["avg_cost"] else 0})
     return {
         "cash": broker.cash,
         "trading_enabled": broker.trading_enabled(),
         "positions": rows,
-        "pending_orders": _records(broker.pending_orders()),
-        "orders": _records(broker.orders(100)),
-        "fills": _records(broker.fills(100)),
+        "pending_orders": _with_name(_records(broker.pending_orders())),
+        "orders": _with_name(_records(broker.orders(100))),
+        "fills": _with_name(_records(broker.fills(100))),
         "performance": performance_summary(),
     }
 
