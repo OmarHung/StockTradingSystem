@@ -85,6 +85,8 @@ export const api = {
   dataStatus: () => get<DataStatus>("/data-status"),
   stocks: () => get<{ stock_id: string; stock_name: string; industry_category: string }[]>("/stocks"),
   quote: (id: string) => get<Quote>(`/quote/${id}`),
+  /** 批量報價：盤中為 shioaji 即時快照，非盤中為最近收盤 */
+  quotes: (ids: string[]) => get<Quote[]>(`/quotes?ids=${ids.join(",")}`),
   price: (id: string, limit = 250, tf = "D", adjusted = true) =>
     get<{ candles: Candle[]; volume: Vol[] }>(`/price/${id}?limit=${limit}&tf=${tf}&adjusted=${adjusted}`),
   kbars: (id: string, tf: number, days: number, limit = 500) =>

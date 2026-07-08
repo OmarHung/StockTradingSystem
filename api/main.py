@@ -335,6 +335,42 @@ def quote(stock_id: str):
     }
 
 
+@app.get("/api/quotes")
+def quotes(ids: str):
+    """自選清單批量報價。盤中用 shioaji snapshots（一次請求全數檔位，額度
+    50 req/5s，遠省於逐檔 tick 訂閱）；非盤中或快照拿不到的檔位回庫存最近收盤。
+    """
+    import datetime as _dt
+
+    from src.data import shioaji_source
+
+    codes = [c.strip() for c in ids.split(",") if c.strip()]
+    if not codes:
+        return []
+    now = _dt.datetime.now()
+    in_session = now.weekday() < 5 and _dt.time(8, 55) <= now.time() <= _dt.time(13, 35)
+    snaps: dict[str, dict] = {}
+    if in_session and shioaji_source.available():
+        try:
+            snaps = shioaji_source.fetch_snapshots([c for c in codes if c.isdigit()])
+        except Exception as e:  # noqa: BLE001 — 快照失敗退回庫存報價
+            log.warning("批量快照失敗（回庫存報價）：%s", e)
+    today = now.date().isoformat()
+    names = q.list_stocks()
+    name_map = dict(zip(names["stock_id"], names["stock_name"])) if not names.empty else {}
+    out = []
+    for c in codes:
+        s = snaps.get(c)
+        if s and s.get("ts_date") == today and s.get("close"):
+            out.append({"stock_id": c, "name": name_map.get(c, ""),
+                        "last": s["close"],
+                        "change": round(s["change_price"], 2),
+                        "change_pct": round(s["change_pct"], 2), "date": today})
+        else:
+            out.append(quote(c))
+    return out
+
+
 # ---------- 選股 ----------
 @app.get("/api/screener")
 def screener(as_of: str, top_n: int | None = None):

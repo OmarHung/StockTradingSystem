@@ -3,7 +3,14 @@ import { useEffect, useState } from "react";
 import { api, type Quote } from "../api";
 import { Panel, fmt, cls, StarButton } from "./Panel";
 
-/** 自選清單：顯示即時報價（目前為收盤基礎，Phase 5 接 shioaji 後改即時串流）。
+// 台北時間是否在交易時段附近（08:55–13:35，週一～五）；盤中才輪詢即時快照
+function marketOpen() {
+  const tw = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
+  const mins = tw.getHours() * 60 + tw.getMinutes();
+  return tw.getDay() >= 1 && tw.getDay() <= 5 && mins >= 8 * 60 + 55 && mins <= 13 * 60 + 35;
+}
+
+/** 自選清單：批量報價（盤中 shioaji 快照每 5s 輪詢即時價，非盤中顯示最近收盤）。
  *  清單由後端持久化（App 提供 ids），星星可移除自選。 */
 export function Watchlist({
   ids, selected, onSelect, onToggleWatch,
@@ -15,13 +22,16 @@ export function Watchlist({
 }) {
   const [quotes, setQuotes] = useState<Quote[]>([]);
 
-  // ids 變動（加入/移除）即重抓報價
+  // ids 變動（加入/移除）即重抓報價；盤中每 5s 輪詢即時快照
   useEffect(() => {
     let cancelled = false;
-    Promise.all(ids.map((id) => api.quote(id).catch(() => null))).then((qs) => {
-      if (!cancelled) setQuotes(qs.filter(Boolean) as Quote[]);
-    });
-    return () => { cancelled = true; };
+    const load = () => {
+      if (!ids.length) { setQuotes([]); return; }
+      api.quotes(ids).then((qs) => { if (!cancelled) setQuotes(qs); }).catch(() => {});
+    };
+    load();
+    const t = window.setInterval(() => { if (marketOpen()) load(); }, 5000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [ids]);
 
   return (

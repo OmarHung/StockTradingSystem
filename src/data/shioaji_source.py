@@ -313,11 +313,11 @@ def get_scanners(kind: str, count: int = 20) -> list[dict]:
 
 
 def fetch_snapshots(codes: list[str]) -> dict[str, dict]:
-    """持倉股票即時快照（盤中停損監控用）。
+    """股票即時快照（盤中停損監控、自選清單即時報價用）。
 
-    回傳 {code: {close, low, high, ts_date}}；ts_date 供判斷是否為今日行情
-    （休市日快照是前一交易日的，呼叫端據此判斷今天沒開盤）。
-    單次最多 500 檔、額度 50 req/5s——輪詢幾檔持倉綽綽有餘。
+    回傳 {code: {close, low, high, change_price, change_pct, ts_date}}；
+    ts_date 供判斷是否為今日行情（休市日快照是前一交易日的，
+    呼叫端據此判斷今天沒開盤）。單次最多 500 檔、額度 50 req/5s。
     """
     import datetime as _dt
 
@@ -332,5 +332,8 @@ def fetch_snapshots(codes: list[str]) -> dict[str, dict]:
     for s in api.snapshots(contracts) or []:
         ts_date = _dt.datetime.fromtimestamp(s.ts / 1e9).date().isoformat() if s.ts else None
         out[s.code] = {"close": float(s.close or 0), "low": float(s.low or 0),
-                       "high": float(s.high or 0), "ts_date": ts_date}
+                       "high": float(s.high or 0),
+                       "change_price": float(s.change_price or 0),
+                       "change_pct": float(s.change_rate or 0),
+                       "ts_date": ts_date}
     return out
