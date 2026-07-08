@@ -184,7 +184,12 @@ export function KChart({
       let curBucket = 0;
       let minuteVols = new Map<number, number>();
       const step = (tfMin ?? 1) * 60;
-      const bucketOf = (t: number) => Math.ceil(t / step) * step;
+      // 桶結束時間標記；60 分尾桶跨越 13:30 收盤競價時 ceil 會落在市場不存在的
+      // 14:00 — 夾回當日 13:30（時間為台北牆鐘當 UTC，當日 13:30 = 日起點 + 48600s）
+      const bucketOf = (t: number) => Math.min(
+        Math.ceil(t / step) * step,
+        Math.floor(t / 86400) * 86400 + 13.5 * 3600,
+      );
 
       ws = api.kbarsWs(stockId);
       ws.onmessage = (evt) => {

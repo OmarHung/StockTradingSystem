@@ -174,6 +174,10 @@ def get_minute_price(stock_id: str, since: str | None = None, tf_min: int = 1) -
         "close": g["close"].last(),
         "volume": g["volume"].sum(),
     }).dropna(subset=["open"]).reset_index()
+    # 60 分桶跨越收盤競價時（13:30 落在 (13:00,14:00]）尾根會標成市場不存在的
+    # 14:00 — 夾回當日 13:30，與看盤軟體一致。
+    cap = out["ts"].dt.normalize() + pd.Timedelta(hours=13, minutes=30)
+    out["ts"] = out["ts"].where(out["ts"] <= cap, cap)
     out["ts"] = out["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
     return out
 
