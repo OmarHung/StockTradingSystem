@@ -132,10 +132,20 @@ class PaperBroker:
 
     # ---------- 撮合與風控執行 ----------
     def execute_pending(self, date: str) -> list[dict]:
-        """開盤撮合：pending 買單於 date 開盤價 ≤ 限價 → 成交；否則失效（隔日有效單）。"""
+        """開盤撮合限價買單（隔日有效單，僅撮合 date 之前掛的單）：
+
+        - 開盤價 ≤ 限價 → 以開盤價成交（買方更划算）；
+        - 否則盤中最低 ≤ 限價 → 以限價成交（盤中觸價成交，貼近真實限價單）；
+        - 全日皆未觸價 → 失效。
+
+        只撈 created_as_of < date 的單：同日重複執行流程時，當天新掛的單留待
+        次交易日撮合（冪等，避免拿掛單當天的行情誤殺）。
+        """
         results = []
         with db.connect(self.db_path) as conn:
-            orders = db.read_sql(conn, "SELECT * FROM orders WHERE status='pending'")
+            orders = db.read_sql(
+                conn, "SELECT * FROM orders WHERE status='pending' AND created_as_of < ?",
+                (date,))
             cash = float(self._get_state(conn, "cash", "0"))
             for o in orders.to_dict(orient="records"):
                 px = q.get_price(o["stock_id"], start=date, end=date)
@@ -143,7 +153,12 @@ class PaperBroker:
                     conn.execute("UPDATE orders SET status='expired' WHERE id=?", (o["id"],))
                     continue
                 open_px = float(px["open"].iloc[0])
-                if o["side"] == "BUY" and open_px <= float(o["limit_price"]):
+                low_px = float(px["low"].iloc[0])
+                limit = float(o["limit_price"])
+                fill_px = (open_px if open_px <= limit
+                           else limit if low_px <= limit else None)
+                if o["side"] == "BUY" and fill_px is not None:
+                    open_px = fill_px
                     amount = o["shares"] * open_px
                     fee = COST.buy_cost(amount)
                     if amount + fee > cash:

@@ -51,6 +51,31 @@ def test_expire_when_gap_up(broker):
     assert broker.positions().empty and broker.cash == 1_000_000
 
 
+def test_fill_at_limit_when_intraday_touches(broker):
+    """開盤高於限價，但盤中最低觸價 → 以限價成交（南亞情境）。"""
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=180.0,
+                     stop_loss=160.0, target=220.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(186.5, 193, 174, 181.5)):
+        res = broker.execute_pending("2024-01-02")
+    assert res[0]["status"] == "filled" and res[0]["price"] == 180.0
+    pos = broker.positions()
+    assert len(pos) == 1 and float(pos.iloc[0]["avg_cost"]) == 180.0
+
+
+def test_same_day_order_not_matched(broker):
+    """同日重複執行流程：當天新掛的單留待次日撮合，不被當天行情誤殺。"""
+    broker.place_buy("2024-01-02", "9999", 1000, limit_price=180.0,
+                     stop_loss=160.0, target=220.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(186.5, 193, 174, 181.5)):
+        res = broker.execute_pending("2024-01-02")   # 撮合日 = 掛單日
+    assert res == []                                  # 未參與撮合
+    assert broker.pending_orders().shape[0] == 1      # 仍為待撮合
+    # 次交易日才撮合（盤中觸價 → 以限價成交）
+    with patch("src.broker.paper.q.get_price", return_value=_px(186.5, 193, 174, 181.5)):
+        res2 = broker.execute_pending("2024-01-03")
+    assert res2[0]["status"] == "filled" and res2[0]["price"] == 180.0
+
+
 def test_stop_loss_exit_with_pnl(broker):
     broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
                      stop_loss=95.0, target=115.0)
