@@ -31,7 +31,11 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     avg_gain = gain.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
     avg_loss = loss.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    out = 100 - (100 / (1 + rs))
+    # Wilder：一段期間內從無下跌（avg_loss==0 且有上漲）時 RSI=100，而非 NaN——
+    # 否則剛上市即連漲的短歷史股會拿到缺值而非超買訊號。warmup 前 avg_loss 為
+    # NaN，(avg_loss==0) 為 False，仍維持 NaN。
+    return out.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
 
 
 def kdj(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 9,

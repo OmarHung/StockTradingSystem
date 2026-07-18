@@ -63,7 +63,11 @@ def fundamental_features(stock_id: str, as_of: str) -> dict:
     """基本面事實：最新月營收與年增率 + 最新估值（本益比/淨值比/殖利率）。"""
     out: dict = {}
     rev = q.get_month_revenue(stock_id)
-    rev = rev[rev["date"] <= as_of] if not rev.empty else rev
+    if not rev.empty:
+        # 公告截止日（次月10日＝存的 date+9 天）才可見，避免前視——date 是次月1日，
+        # 只用 date<=as_of 會在 as_of 落於次月1~9日時看到尚未公告的營收（同 #7）
+        visible = (pd.to_datetime(rev["date"]) + pd.Timedelta(days=9)) <= pd.to_datetime(as_of)
+        rev = rev[visible]
     if not rev.empty:
         rev = rev.sort_values(["revenue_year", "revenue_month"])
         latest = rev.iloc[-1]

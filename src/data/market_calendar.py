@@ -107,18 +107,31 @@ def is_trading_day(date_str: str, allow_fetch: bool = True) -> bool:
         _ensure_tables(conn)
         if allow_fetch:
             _maybe_sync(conn, d.year)
-        hit = conn.execute("SELECT 1 FROM market_holiday WHERE date=?",
-                           (date_str,)).fetchone()
-    return hit is None
+        return _is_trading_day_conn(conn, date_str)
+
+
+def _is_trading_day_conn(conn, date_str: str) -> bool:
+    """交易日判斷（用已開啟的連線；週末→False、假日表命中→False）。"""
+    if dt.date.fromisoformat(date_str).weekday() >= 5:
+        return False
+    return conn.execute("SELECT 1 FROM market_holiday WHERE date=?",
+                        (date_str,)).fetchone() is None
 
 
 def next_trading_day(date_str: str, allow_fetch: bool = True) -> str:
-    """date_str 之後（不含當天）的下一個交易日——隔日委託的預計撮合日。"""
+    """date_str 之後（不含當天）的下一個交易日——隔日委託的預計撮合日。
+
+    整段共用一條連線（原本每天各開一條，春節連假可連開近 10 條）。
+    """
     d = dt.date.fromisoformat(date_str)
-    for _ in range(30):   # 春節連假最長也遠小於 30 天，防呆上限
-        d += dt.timedelta(days=1)
-        if is_trading_day(d.isoformat(), allow_fetch=allow_fetch):
-            return d.isoformat()
+    with db.connect(get_settings().db_path) as conn:
+        _ensure_tables(conn)
+        if allow_fetch:
+            _maybe_sync(conn, d.year)
+        for _ in range(30):   # 春節連假最長也遠小於 30 天，防呆上限
+            d += dt.timedelta(days=1)
+            if _is_trading_day_conn(conn, d.isoformat()):
+                return d.isoformat()
     return d.isoformat()
 
 

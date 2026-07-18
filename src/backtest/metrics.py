@@ -35,8 +35,10 @@ def sharpe(daily_ret: pd.Series, rf: float = 0.0) -> float:
 
 def sortino(daily_ret: pd.Series, rf: float = 0.0) -> float:
     excess = daily_ret - rf / TRADING_DAYS
-    downside = excess[excess < 0]
-    dd = downside.std(ddof=0)
+    # 下行偏差＝全期 min(excess,0) 的均方根（非「只取負報酬再算 std」——後者會
+    # 減去負報酬自身的均值、且分母只除以負報酬筆數，兩處都偏離 Sortino 定義）
+    downside = np.minimum(excess, 0.0)
+    dd = float(np.sqrt((downside ** 2).mean()))
     if dd == 0:
         return 0.0
     return float(excess.mean() / dd * np.sqrt(TRADING_DAYS))
@@ -52,10 +54,16 @@ def max_drawdown(equity: pd.Series) -> float:
 def win_rate_from_trades(trades: pd.DataFrame) -> dict:
     """以「配對買賣」粗估每檔平均損益（FIFO）。回傳勝率與盈虧比。
 
-    Phase 1 為組合層級回測，交易配對僅供參考；精細的逐筆損益歸因於 Phase 5 交易日誌處理。
+    損益已扣往返交易成本（買賣手續費＋證交稅，比例估算不含最低 20 元）——否則
+    貼近損益兩平的策略勝率會被系統性灌水，與含成本的權益曲線口徑不一致。
+    Phase 1 為組合層級回測，交易配對僅供參考；精細逐筆歸因於 Phase 5 交易日誌。
     """
     if trades is None or trades.empty:
         return {"win_rate": None, "n_closed": 0}
+    from src.env.costs import CostModel
+    c = CostModel()
+    buy_rate = c.fee_rate * c.fee_discount
+    sell_rate = c.fee_rate * c.fee_discount + c.tax_rate
     realized = []
     for sid, g in trades.groupby("stock_id"):
         lots = []  # FIFO 佇列 (shares, price)
@@ -67,7 +75,9 @@ def win_rate_from_trades(trades: pd.DataFrame) -> dict:
                 while sell_sh > 0 and lots:
                     lot = lots[0]
                     matched = min(sell_sh, lot[0])
-                    realized.append((sell_px - lot[1]) * matched)
+                    gross = (sell_px - lot[1]) * matched
+                    cost = lot[1] * matched * buy_rate + sell_px * matched * sell_rate
+                    realized.append(gross - cost)
                     lot[0] -= matched
                     sell_sh -= matched
                     if lot[0] == 0:

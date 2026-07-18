@@ -2,7 +2,7 @@ import { FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, LineSeries, HistogramSeries, type IChartApi, type Time } from "lightweight-charts";
 import { api } from "../api";
-import { fmt, cls } from "./Panel";
+import { fmt, cls, safeUrl } from "./Panel";
 
 type Pt = { time: string; value: number };
 
@@ -351,8 +351,8 @@ export function StockBrowserModal({ onClose, onSelect }: {
                     {(d.news as any[] ?? []).map((n, i) => (
                       <div key={i} style={{ padding: "7px 2px", fontSize: 12, borderBottom: "1px solid var(--border)" }}>
                         <span className="mono" style={{ color: "var(--text-dim)", marginRight: 8 }}>{n.date}</span>
-                        {n.url
-                          ? <a href={n.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{n.title}</a>
+                        {safeUrl(n.url)
+                          ? <a href={safeUrl(n.url)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{n.title}</a>
                           : n.title}
                         {n.source && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>（{n.source}）</span>}
                       </div>

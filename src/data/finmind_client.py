@@ -115,7 +115,10 @@ class FinMindClient:
             # 429 = 頻率限制：退避重試
             if resp.status_code == 429:
                 raise FinMindError("FinMind 頻率限制（HTTP 429），稍後重試")
-            resp.raise_for_status()
+            # 不用 raise_for_status：它的例外訊息含完整 URL（?token=...），會把
+            # token 寫進日誌。自行拋不含 URL 的訊息。
+            if not resp.ok:
+                raise FinMindError(f"FinMind HTTP {resp.status_code}")
 
             payload = resp.json()
             if payload.get("status") != 200:

@@ -1,6 +1,7 @@
 import { Newspaper } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { safeUrl } from "./Panel";
 
 interface NewsRow {
   stock_id: string; name: string; date: string;
@@ -89,8 +90,8 @@ export function NewsModal({ onClose, onSelect }: {
                       onClick={() => { onSelect(n.stock_id); onClose(); }}>
                       {n.stock_id}{n.name ? ` ${n.name}` : ""}
                     </b>
-                    {n.url
-                      ? <a href={n.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{n.title}</a>
+                    {safeUrl(n.url)
+                      ? <a href={safeUrl(n.url)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{n.title}</a>
                       : n.title}
                     {n.source && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>（{n.source}）</span>}
                   </div>
@@ -147,8 +148,8 @@ export function NewsModal({ onClose, onSelect }: {
                   {scout.headlines.map((h, i) => (
                     <div key={i} style={{ padding: "4px 2px", fontSize: 11, borderBottom: "1px solid var(--border)" }}>
                       <span className="mono" style={{ color: "var(--text-dim)", marginRight: 6 }}>{h.date.slice(5)}</span>
-                      {h.url
-                        ? <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{h.title}</a>
+                      {safeUrl(h.url)
+                        ? <a href={safeUrl(h.url)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{h.title}</a>
                         : <span style={{ color: "var(--text)" }}>{h.title}</span>}
                       <span style={{ marginLeft: 6, color: "var(--text-dim)" }}>（{h.source}）</span>
                     </div>

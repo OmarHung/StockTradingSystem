@@ -46,7 +46,15 @@ def update_section(section: str, values: dict, path: str | Path = DEFAULT_SETTIN
 
 
 def set_env_var(key: str, value: str, path: str | Path = ENV_PATH) -> None:
-    """寫入/更新 .env 的一個變數（供 WebUI 設定 API token）。同時更新當前進程環境。"""
+    """寫入/更新 .env 的一個變數（供 WebUI 設定 API token）。同時更新當前進程環境。
+
+    key/value 拒絕換行與控制字元：含 '\\n' 的 value 會被寫成 .env 的多行，等於能
+    注入任意環境變數（如改寫 ANTHROPIC_BASE_URL 竊金鑰）。
+    """
+    if any(ord(c) < 0x20 or c in "\r\n" for c in f"{key}{value}"):
+        raise ValueError("環境變數的名稱/值不可含換行或控制字元")
+    if "=" in key or not key.strip():
+        raise ValueError("環境變數名稱不合法")
     path = Path(path)
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     out, found = [], False

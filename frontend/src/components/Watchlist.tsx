@@ -1,14 +1,7 @@
 import { Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Quote } from "../api";
-import { Panel, fmt, cls, StarButton } from "./Panel";
-
-// 台北時間是否在交易時段附近（08:55–13:35，週一～五）；盤中才輪詢即時快照
-function marketOpen() {
-  const tw = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" }));
-  const mins = tw.getHours() * 60 + tw.getMinutes();
-  return tw.getDay() >= 1 && tw.getDay() <= 5 && mins >= 8 * 60 + 55 && mins <= 13 * 60 + 35;
-}
+import { Panel, fmt, cls, StarButton, marketOpen } from "./Panel";
 
 /** 自選清單：批量報價（盤中 shioaji 快照每 5s 輪詢即時價，非盤中顯示最近收盤）。
  *  清單由後端持久化（App 提供 ids），星星可移除自選。 */

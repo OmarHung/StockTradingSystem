@@ -266,6 +266,18 @@ def test_add_position_keeps_higher_stop(broker):
     assert int(pos["shares"]) == 2000
 
 
+def test_portfolio_state_reflects_pending_orders(broker):
+    """Guard 看得到未成交委託：pending 買單預留現金並計入曝險
+    （否則同批決策後續標的會現金超掛、突破 max_positions、同檔重複掛單）。"""
+    broker.place_buy("2024-01-01", "2330", 1000, limit_price=100.0,
+                     stop_loss=95.0, target=115.0, industry="半導體")
+    ps = broker.portfolio_state(as_of="2024-01-01")
+    # 現金被預留（股數×限價 + 手續費 142.5）
+    assert abs((1_000_000 - ps.cash) - (100_000 + 100_000 * 0.001425)) < 1.0
+    # pending 檔位計入 positions（供 max_positions/single-position/重複偵測）
+    assert "2330" in ps.positions and ps.positions["2330"].shares == 1000
+
+
 def test_sell_fee_min_20(broker):
     """賣出手續費套最低 20 元（小額出場不被低估，與 CostModel/回測一致）。"""
     with db.connect(broker.db_path) as conn:

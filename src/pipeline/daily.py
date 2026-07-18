@@ -81,8 +81,13 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     log.info("權益快照 %s：現金 %s + 持倉 %s = %s",
              as_of, f"{snap['cash']:,.0f}", f"{snap['positions_value']:,.0f}", f"{snap['equity']:,.0f}")
 
-    # ⑤ 週五：成果評估 + 反思（在決策前，讓新規則立即生效）
-    if reflect_weekly and dt.date.fromisoformat(as_of).weekday() == 4:
+    # ⑤ 每週最後交易日：成果評估 + 反思（在決策前，讓新規則立即生效）。
+    # 用「下一交易日落在不同 ISO 週」判定，而非死綁週五——週五逢國定假日時，
+    # 綁週五會讓當週反思與成果評估整週消失。
+    _next_td = mcal.next_trading_day(as_of)
+    _is_week_end = (dt.date.fromisoformat(as_of).isocalendar()[:2]
+                    != dt.date.fromisoformat(_next_td).isocalendar()[:2])
+    if reflect_weekly and _is_week_end:
         try:
             from src.memory import outcome, reflect
             ev = outcome.evaluate_pending(today=as_of)

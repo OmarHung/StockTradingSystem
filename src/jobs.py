@@ -105,10 +105,20 @@ def stop_job(name: str) -> bool:
 
 
 def read_log(name: str, tail: int = 30) -> str:
-    """讀 log 尾端數行。tqdm 進度用 \\r 更新，這裡正規化成換行再取尾段。"""
+    """讀 log 尾端數行。tqdm 進度用 \\r 更新，這裡正規化成換行再取尾段。
+
+    只從檔尾讀固定塊（非整檔）：全市場回補的 \\r 進度幀可累積到數十~上百 MB，
+    而多個 status 端點被 WebUI 每幾秒輪詢，整檔讀會反覆做大量 IO 打滿 CPU。
+    """
     log_path, _ = _paths(name)
     if not log_path.exists():
         return ""
-    text = log_path.read_text(encoding="utf-8", errors="replace").replace("\r", "\n")
+    read_bytes = max(tail, 1) * 4096   # 每行估 4KB 上限，足夠涵蓋 tail 行
+    with open(log_path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - read_bytes))
+        chunk = f.read()
+    text = chunk.decode("utf-8", errors="replace").replace("\r", "\n")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     return "\n".join(lines[-tail:])

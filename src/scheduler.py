@@ -27,6 +27,10 @@ JOB_DEFS = {
         "label": "盤中停損監控",
         "job_name": "intraday",
         "args": ["scripts.intraday_monitor"],   # 09:00 啟動，收盤/無持倉自行結束
+        # keepalive：盤中時段窗口內只要沒在跑就（重）啟動，不看「今天跑過沒」——
+        # 崩潰後當天能重啟，持倉停損保護不消失。收盤後窗口關閉，重啟也會即刻自退。
+        "keepalive": True,
+        "keepalive_until": "13:32",
     },
     "dataupdate": {
         "label": "盤後價格更新",
@@ -73,9 +77,15 @@ def _conn():
 
 
 def _cfg() -> dict:
-    """讀 settings.yaml 的 scheduler 區塊（每次即時讀，WebUI 改了立刻生效）。"""
+    """讀 settings.yaml 的 scheduler 區塊（每次直讀檔案，即時生效）。
+
+    直讀 config_io.load_raw（非 get_settings）：後者是 lru_cache，只有經 WebUI
+    save_raw 才清快取；在 VPS 上直接 vim settings.yaml 改排程時間/開關時，
+    get_settings 會一直回舊值到重啟。每 30 秒讀一次檔的成本可忽略。
+    """
     try:
-        raw = get_settings()["scheduler"]
+        from src import config_io
+        raw = config_io.load_raw().get("scheduler") or {}
         return {k: dict(v) for k, v in dict(raw).items()}
     except Exception:  # noqa: BLE001
         return {}
@@ -124,6 +134,15 @@ def _due(name: str, spec_cfg: dict, now: dt.datetime) -> bool:
         return False
     if now < due_at:
         return False
+    spec = JOB_DEFS[name]
+    if spec.get("keepalive"):
+        # 時段窗口內只要沒在跑就（重）啟動；trigger 另有 is_running 防雙啟動
+        try:
+            eh, em = str(spec.get("keepalive_until", "13:32")).split(":")
+            until = now.replace(hour=int(eh), minute=int(em), second=0, microsecond=0)
+        except ValueError:
+            return False
+        return now < until and not jobs.is_running(spec["job_name"])
     return not _ran_today(name, now.date().isoformat())
 
 

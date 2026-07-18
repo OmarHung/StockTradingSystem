@@ -1,7 +1,7 @@
 import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { Panel, fmt } from "./Panel";
+import { Panel, fmt, safeUrl } from "./Panel";
 
 const ACTION: Record<string, { cls: string; label: string }> = {
   buy: { cls: "buy", label: "買進" },
@@ -153,8 +153,8 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
                   {scout.headlines.map((h, i) => (
                     <div key={i} style={{ padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
                       <span className="mono" style={{ marginRight: 6 }}>{h.date.slice(5)}</span>
-                      {h.url
-                        ? <a href={h.url} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{h.title}</a>
+                      {safeUrl(h.url)
+                        ? <a href={safeUrl(h.url)} target="_blank" rel="noreferrer" style={{ color: "var(--text)" }}>{h.title}</a>
                         : <span style={{ color: "var(--text)" }}>{h.title}</span>}
                       <span style={{ marginLeft: 6 }}>（{h.source}）</span>
                     </div>

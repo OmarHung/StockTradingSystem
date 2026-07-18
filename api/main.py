@@ -48,12 +48,27 @@ app = FastAPI(title="StockTradingSystem API", version="0.1.0")
 db.init_db(get_settings().db_path)
 
 
+# 常駐背景 task 的強參考：event loop 只持弱參考，不保存會被 GC 中途回收，
+# 排程心臟／行情聚合器就這樣靜默消失。存 app.state 保命並留屍檢線索。
+app.state.bg_tasks = set()
+
+
+def _spawn_bg(coro):
+    import asyncio
+    t = asyncio.create_task(coro)
+    app.state.bg_tasks.add(t)
+    t.add_done_callback(lambda tt: (
+        app.state.bg_tasks.discard(tt),
+        tt.cancelled() or tt.exception() and log.error("背景 task 異常結束：%r", tt.exception()),
+    ))
+    return t
+
+
 @app.on_event("startup")
 async def _start_scheduler():
     """後端內建排程器（取代 launchd）：asyncio 常駐迴圈，觸發走 jobs.py 子行程。"""
-    import asyncio
     from src import scheduler
-    asyncio.create_task(scheduler.run_loop())
+    _spawn_bg(scheduler.run_loop())
 
 
 @app.on_event("startup")
@@ -61,6 +76,12 @@ async def _start_realtime():
     """即時 K 線服務：綁定事件迴圈（券商登入延到首次訂閱才發生）。"""
     from src import realtime
     realtime.service.attach_loop()
+
+
+@app.on_event("shutdown")
+async def _stop_bg_tasks():
+    for t in list(app.state.bg_tasks):
+        t.cancel()
 
 @app.middleware("http")
 async def _log_requests(request, call_next):
@@ -84,12 +105,29 @@ async def _log_requests(request, call_next):
     return response
 
 
+_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173",
+                    "http://localhost:8000", "http://127.0.0.1:8000"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _csrf_guard(request, call_next):
+    """CSRF 防護：CORS 只限制「回應可否被讀取」，擋不住無 body/無自訂 header 的
+    跨站 simple request 送達（惡意網頁可對 localhost 盲發 POST 清空帳本/觸發花費）。
+    對有副作用的方法，若帶了 Origin 且不在白名單即 403（同源請求通常不帶 Origin，
+    帶了就必須匹配）。"""
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if origin and origin not in _ALLOWED_ORIGINS:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "CSRF: origin 不被允許"}, status_code=403)
+    return await call_next(request)
 
 
 def _records(df):
@@ -358,6 +396,10 @@ def quotes(ids: str):
     today = now.date().isoformat()
     names = q.list_stocks()
     name_map = dict(zip(names["stock_id"], names["stock_name"])) if not names.empty else {}
+    # 需要庫存報價的檔位（無即時快照者）一次 SQL 取回，避免逐檔全歷史讀＋重掃 list_stocks
+    fallback = [c for c in codes
+                if not (snaps.get(c) and snaps[c].get("ts_date") == today and snaps[c].get("close"))]
+    fb = _bulk_recent_quotes(fallback, name_map)
     out = []
     for c in codes:
         s = snaps.get(c)
@@ -367,7 +409,38 @@ def quotes(ids: str):
                         "change": round(s["change_price"], 2),
                         "change_pct": round(s["change_pct"], 2), "date": today})
         else:
-            out.append(quote(c))
+            out.append(fb.get(c) or {"stock_id": c, "name": name_map.get(c, ""),
+                                     "last": None, "change": None, "change_pct": None})
+    return out
+
+
+def _bulk_recent_quotes(codes: list[str], name_map: dict) -> dict:
+    """一次 SQL 取多檔最近兩個交易日收盤，算報價（供 quotes fallback，免 N+1 全歷史）。"""
+    if not codes:
+        return {}
+    ph = ",".join("?" * len(codes))
+    with db.connect(get_settings().db_path) as conn:
+        rows = db.read_sql(conn, f"""
+            WITH recent AS (
+                SELECT stock_id, date, close,
+                       ROW_NUMBER() OVER (PARTITION BY stock_id ORDER BY date DESC) rn
+                FROM price_daily
+                WHERE stock_id IN ({ph}) AND close > 0
+                  AND date >= date((SELECT MAX(date) FROM price_daily), '-15 days')
+            )
+            SELECT a.stock_id, a.date, a.close AS last, b.close AS prev
+            FROM recent a LEFT JOIN recent b ON b.stock_id=a.stock_id AND b.rn=2
+            WHERE a.rn=1
+        """, tuple(codes))
+    out = {}
+    for r in rows.itertuples():
+        last = float(r.last)
+        prev = float(r.prev) if r.prev is not None and r.prev == r.prev else last  # NaN!=NaN
+        out[r.stock_id] = {
+            "stock_id": r.stock_id, "name": name_map.get(r.stock_id, ""), "last": last,
+            "change": round(last - prev, 2),
+            "change_pct": round((last / prev - 1) * 100, 2) if prev else 0.0,
+            "date": r.date}
     return out
 
 
@@ -467,7 +540,9 @@ class BacktestReq(BaseModel):
 
 
 _BT_JOB = "backtest"
-_BT_RESULT = Path("logs/jobs/backtest_result.json")
+# 用絕對路徑（與 jobs.py 子行程的 cwd=ROOT 同源）：相對 CWD 在非專案目錄啟動
+# uvicorn 時會解析到別處，unlink 刪不到舊檔、status 讀到過期結果且錯得很安靜
+_BT_RESULT = jobs.JOBS_DIR / "backtest_result.json"
 
 
 @app.post("/api/backtest/start")

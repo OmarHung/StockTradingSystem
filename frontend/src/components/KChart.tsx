@@ -98,6 +98,7 @@ export function KChart({
 
     let cancelled = false;
     let ws: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
     let hovering = false;
     let candles: Bar[] = [];
     const barMap = new Map<string, { bar: Bar; prevClose: number | null }>();
@@ -190,8 +191,19 @@ export function KChart({
         Math.floor(t / 86400) * 86400 + 13.5 * 3600,
       );
 
-      ws = api.kbarsWs(stockId);
-      ws.onmessage = (evt) => {
+      // 斷線自動重連（退避 3s→最多 15s）：API 重啟/連線中斷後，副標仍顯示「即時」
+      // 但圖表靜止是有實害的靜默失效，長開頁面幾乎必遇。
+      let wsRetry = 3000;
+      const connectWs = () => {
+        if (cancelled) return;
+        ws = api.kbarsWs(stockId);
+        ws.onopen = () => { wsRetry = 3000; };
+        ws.onclose = () => {
+          if (cancelled) return;
+          reconnectTimer = window.setTimeout(connectWs, wsRetry);
+          wsRetry = Math.min(wsRetry * 1.5, 15000);
+        };
+        ws.onmessage = (evt) => {
         if (cancelled) return;
         let m: any;
         try { m = JSON.parse(evt.data); } catch { return; }
@@ -213,7 +225,9 @@ export function KChart({
           // 今日日 K：tick 自帶今日開高低與累計量，整根覆蓋（自我校正）
           commitLive({ time: m.date, open: m.o, high: m.h, low: m.l, close: m.c }, m.v);
         }
+        };
       };
+      connectWs();
     }).catch(() => { /* 載入失敗：保持空圖，不拋 unhandled rejection */ })
       .finally(() => { if (!cancelled) setLoading(false); });
 
@@ -227,6 +241,7 @@ export function KChart({
 
     return () => {
       cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();

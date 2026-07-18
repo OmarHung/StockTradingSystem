@@ -196,12 +196,22 @@ def _entry(report, confidence, flags) -> dict:
 
 def _save_plan(record: dict) -> None:
     p = record["plan"]
+    # ON CONFLICT DO UPDATE 而非 INSERT OR REPLACE：後者先刪後插，會把成果評估寫回的
+    # outcome/outcome_return/evaluated_at 一併洗成 NULL（同日重跑分析即遺失已評估結果，
+    # 反思層據以歸納的資料被清空）。這裡只更新計畫欄位，不碰 outcome 三欄。
     with db.connect(get_settings().db_path) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO trade_plan "
+            "INSERT INTO trade_plan "
             "(as_of, stock_id, action, action_score, confidence, entry_low, entry_high, "
             " stop_loss, target_price, reward_risk, rationale, plan_json, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(as_of, stock_id) DO UPDATE SET "
+            "  action=excluded.action, action_score=excluded.action_score, "
+            "  confidence=excluded.confidence, entry_low=excluded.entry_low, "
+            "  entry_high=excluded.entry_high, stop_loss=excluded.stop_loss, "
+            "  target_price=excluded.target_price, reward_risk=excluded.reward_risk, "
+            "  rationale=excluded.rationale, plan_json=excluded.plan_json, "
+            "  created_at=excluded.created_at",
             (record["as_of"], record["stock_id"], p["action"], p["action_score"],
              p["confidence"], p["entry_low"], p["entry_high"], p["stop_loss"],
              p["target_price"], p["reward_risk"], p["rationale"],

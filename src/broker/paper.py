@@ -111,7 +111,14 @@ class PaperBroker:
         return dict(zip(rows["stock_id"], rows["d"])) if not rows.empty else {}
 
     def portfolio_state(self, as_of: str | None = None) -> PortfolioState:
-        """組出 Guard pipeline 需要的組合狀態（真實持倉版）。"""
+        """組出 Guard pipeline 需要的組合狀態（真實持倉 + 未成交委託）。
+
+        納入 pending 委託：同一批決策逐檔跑 Guard 時，前面已掛的限價買單代表「已
+        承諾的曝險與資金占用」，後面標的必須看得到——否則現金可被超掛、max_positions
+        可被突破、同一檔可重複掛單（Guard 只看已成交持倉會全數漏掉）。
+        pending 以限價估市值、預留現金（含手續費），冪等：撮合成交後委託消失、
+        真實持倉補上，狀態自然接續。
+        """
         cfg = get_settings()
         pos_df = self.positions()
         positions: dict[str, Position] = {}
@@ -121,11 +128,21 @@ class PaperBroker:
             positions[r.stock_id] = Position(
                 shares=int(r.shares), value=int(r.shares) * last,
                 industry=r.industry or "")
+        reserved = 0.0
+        for o in self.pending_orders().itertuples():
+            cost = int(o.shares) * float(o.limit_price)
+            reserved += cost + COST.buy_cost(cost)    # 預留資金（含手續費）
+            if o.stock_id in positions:               # 已有持倉再掛加碼單 → 疊加曝險
+                positions[o.stock_id].shares += int(o.shares)
+                positions[o.stock_id].value += cost
+            else:
+                positions[o.stock_id] = Position(
+                    shares=int(o.shares), value=cost, industry=(o.industry or ""))
         eq_hist = self.equity_history()
         peak = float(eq_hist["equity"].max()) if not eq_hist.empty else None
         return PortfolioState(
             total_capital=float(cfg["capital"]["total"]),
-            cash=self.cash,
+            cash=max(0.0, self.cash - reserved),      # 扣掉已掛委託占用的現金
             positions=positions,
             recent_stops=self.recent_stops(as_of=as_of),
             peak_equity=peak,
@@ -192,7 +209,7 @@ class PaperBroker:
             log.warning("%s 無 TAIEX 日K（臨時休市或價格未回補）——撮合跳過、委託保留", date)
             return []
         results = []
-        with db.connect(self.db_path) as conn:
+        with db.connect(self.db_path, immediate=True) as conn:  # 序列化現金讀改寫
             orders = db.read_sql(
                 conn, "SELECT * FROM orders WHERE status='pending' AND created_as_of < ?",
                 (date,))
@@ -257,7 +274,7 @@ class PaperBroker:
         與 check_stops 相同的費稅/損益/帳本邏輯；持股不存在回 None（冪等，
         收盤 check_stops 再跑到同一檔也不會重複出場）。
         """
-        with db.connect(self.db_path) as conn:
+        with db.connect(self.db_path, immediate=True) as conn:  # 序列化現金讀改寫
             pos = db.read_sql(conn, "SELECT * FROM positions WHERE stock_id=?", (stock_id,))
             if pos.empty:
                 return None
@@ -286,7 +303,7 @@ class PaperBroker:
         成交（實際賣得更好）。
         """
         results = []
-        with db.connect(self.db_path) as conn:
+        with db.connect(self.db_path, immediate=True) as conn:  # 序列化現金讀改寫
             pos = db.read_sql(conn, "SELECT * FROM positions")
             cash = float(self._get_state(conn, "cash", "0"))
             for p in pos.to_dict(orient="records"):

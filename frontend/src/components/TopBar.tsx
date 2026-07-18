@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { FlaskConical, FolderOpen, Database, Newspaper, Settings, RotateCcw } from "lucide-react";
 import { api, type LlmUsage, type Quote } from "../api";
-import { fmt, cls } from "./Panel";
+import { fmt, cls, marketOpen } from "./Panel";
 
 /** 頂部狀態列：logo、券商環境徽章、大盤指標、時鐘、資料連線狀態、設定。 */
 export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBrowser, onOpenBacktest, onOpenNews, onResetLayout }: {
@@ -20,11 +20,14 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
-    api.indices().then(setIndices).catch(() => {});
+    // 大盤指數：盤中每 30s 重抓（原本只在掛載時抓一次，長開頁面盤中一直顯示開頁快照）
+    const loadIndices = () => api.indices().then(setIndices).catch(() => {});
+    loadIndices();
+    const idx = setInterval(() => { if (marketOpen()) loadIndices(); }, 30_000);
     const loadUsage = () => api.llmUsage().then(setUsage).catch(() => {});
     loadUsage();
     const u = setInterval(loadUsage, 60_000);
-    return () => { clearInterval(t); clearInterval(u); };
+    return () => { clearInterval(t); clearInterval(u); clearInterval(idx); };
   }, []);
 
   return (
@@ -51,8 +54,10 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
       ))}
       <div className="spacer" />
       {(() => {
-        const day = now.getDay(), hm = now.getHours() * 60 + now.getMinutes();
-        const open = day >= 1 && day <= 5 && hm >= 540 && hm <= 810;  // 平日 09:00–13:30
+        // 台北時區判斷（09:00–13:30 平日）；用瀏覽器本地時間會讓非台灣時區的
+        // 客戶端顯示錯誤的盤中/收盤，且與自選清單的輪詢行為矛盾。now 只為每秒重繪。
+        void now;
+        const open = marketOpen(540, 810);
         return open
           ? <span className="mkt-open"><span className="dot" />盤中</span>
           : <span className="mkt-closed"><span className="dot" />已收盤</span>;

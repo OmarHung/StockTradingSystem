@@ -62,7 +62,11 @@ def _post(token: str, chat_id: str, text: str, parse_mode: str | None) -> dict:
     payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    r = requests.post(_API.format(token=token), json=payload, timeout=15)
+    try:
+        r = requests.post(_API.format(token=token), json=payload, timeout=15)
+    except requests.RequestException as e:
+        # requests 例外訊息含完整 URL（含 bot token）——脫敏後再拋，避免寫進日誌
+        raise RuntimeError(f"Telegram 連線失敗：{type(e).__name__}") from None
     try:
         data = r.json()
     except ValueError:

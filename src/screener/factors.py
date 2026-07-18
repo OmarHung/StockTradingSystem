@@ -103,12 +103,16 @@ def compute_factors(
 
 
 def _chips_net_buy(inst: pd.DataFrame | None, lookback: int) -> float:
-    """外資 + 投信 近 lookback 日淨買（買-賣，股數加總）。無資料回 0。"""
+    """外資 + 投信 近 lookback 日淨買（買-賣，股數加總）。無資料回 NaN。
+
+    無籌碼資料回 NaN（非 0）：0 會被 z-score 當成真實的「淨買為 0」參與分布，
+    系統性壓低未覆蓋股的分數；NaN 讓 _zscore 走中性填補（同 revenue_yoy 處理）。
+    """
     if inst is None or inst.empty:
-        return 0.0
+        return np.nan
     focus = inst[inst["name"].isin(["Foreign_Investor", "Investment_Trust"])].copy()
     if focus.empty:
-        return 0.0
+        return np.nan
     recent_dates = sorted(focus["date"].unique())[-lookback:]
     focus = focus[focus["date"].isin(recent_dates)]
     return float((focus["buy"] - focus["sell"]).sum())

@@ -387,9 +387,18 @@ def init_db(db_path: str | Path) -> None:
 
 
 @contextmanager
-def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
+def connect(db_path: str | Path, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+    """開一條連線；離開時 commit、關閉。
+
+    immediate=True：進入時即 BEGIN IMMEDIATE 取得寫鎖，序列化跨行程的
+    read-modify-write（如帳本現金）——SQLite 預設 deferred 交易要到第一次寫入才
+    取鎖，兩個行程可能都讀到同一份現金再各自寫入造成遺失更新。busy_timeout 30 秒
+    內等鎖釋放。
+    """
     conn = get_connection(db_path)
     try:
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
     finally:

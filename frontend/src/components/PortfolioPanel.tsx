@@ -12,7 +12,6 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
   const [dailyLog, setDailyLog] = useState("");
   const chartRef = useRef<HTMLDivElement>(null);
   const chartApi = useRef<IChartApi | null>(null);
-  const poll = useRef<number | null>(null);
 
   const load = () => api.portfolio().then(setData).catch(() => {});
 
@@ -30,7 +29,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
         wasRunning.current = s.running;
       } catch { /* 後端暫時無回應，下輪再試 */ }
     }, 4000);
-    return () => { clearInterval(t); if (poll.current) clearInterval(poll.current); };
+    return () => clearInterval(t);
   }, []);
 
   // 權益曲線 vs TAIEX
@@ -73,7 +72,8 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <button className="btn" style={{ fontSize: 11 }} onClick={async () => {
             if (!window.confirm("重置模擬帳本？將清空持倉/成交/權益紀錄，現金回到起始資金。")) return;
-            await api.portfolioReset(); load();
+            try { await api.portfolioReset(); } catch (e) { alert(`重置失敗：${e}`); }
+            load();
           }}>♻️ 重置</button>
           <button className="btn primary" onClick={runDaily} disabled={dailyRunning}>
             {dailyRunning ? "每日流程執行中…" : "▶ 執行每日流程"}
@@ -85,7 +85,10 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
             onClick={async () => {
               if (enabled == null) return;   // 狀態未載入，不動作
               if (enabled && !window.confirm("確定要緊急停止交易？\n停止後每日流程只做保護性出場，不會開新倉。")) return;
-              await api.tradingToggle(!enabled); load();
+              // 緊急停止是安全開關：失敗必須明確告知，否則使用者以為已停實際沒停
+              try { await api.tradingToggle(!enabled); }
+              catch (e) { alert(`切換失敗，交易狀態未改變：${e}`); }
+              load();
             }}>
             {enabled === undefined || enabled === null ? "…" : enabled ? "🛑 緊急停止" : "⛔ 已停止（點擊恢復）"}
           </button>
