@@ -51,11 +51,21 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
   const run = async () => {
     setLoading(true);
     setProg({ stage: "啟動中…", current: 0, total: 0 });
+    let fails = 0;
     try {
       await api.analyzeStart(asOf, topN);   // 已在跑則直接接上輪詢
       for (;;) {
         await new Promise((r) => setTimeout(r, 800));
-        const st = await api.analyzeStatus();
+        let st;
+        try {
+          st = await api.analyzeStatus();
+          fails = 0;
+        } catch (e) {
+          // 單次輪詢失敗（後端忙/dev reload/網路抖動）不放棄：後端分析仍在跑，
+          // 連續失敗才收尾，避免誤報失敗讓使用者重按
+          if (++fails >= 8) throw e;
+          continue;
+        }
         setProg({ stage: st.stage, current: st.current, total: st.total });
         if (!st.running) {
           if (st.error) throw new Error(st.error);
@@ -80,7 +90,8 @@ export function ReportPanel({ hasKey, onSelect }: { hasKey: boolean; onSelect: (
     <Panel title="AI 選股報告" icon={<Bot size={13} />}
       right={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
+            disabled={loading} />
           <input type="number" min={1} max={10} value={topN} style={{ width: 48 }}
             onChange={(e) => setTopN(+e.target.value)} disabled={loading} />
           {loading ? (

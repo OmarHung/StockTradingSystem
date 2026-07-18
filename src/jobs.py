@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,6 +18,10 @@ JOBS_DIR = ROOT / "logs" / "jobs"
 
 # 本程序啟動的 job handle（poll() 會正確 reap 子程序，避免殭屍誤判存活）
 _PROCS: dict[str, subprocess.Popen] = {}
+# start_job 的 check-then-act 需序列化：API 同步端點跑在 threadpool、排程器跑在
+# event loop，兩者可真正並行呼叫 start_job（前端連點/排程撞手動）；無鎖時都先看到
+# is_running=False 再各自 spawn → 兩個同名子行程搶 DB 寫鎖、pid 檔互蓋、log 錯亂。
+_start_lock = threading.Lock()
 
 
 def _paths(name: str) -> tuple[Path, Path]:
@@ -29,23 +34,25 @@ def start_job(name: str, args: list[str]) -> bool:
 
     若同名 job 仍在執行則不重複啟動，回傳 False。
     """
-    if is_running(name):
-        return False
-    log_path, pid_path = _paths(name)
-    if log_path.exists():
-        # 保留上一輪輸出（含崩潰 traceback）供除錯，否則覆寫後死無對證
-        log_path.replace(log_path.with_suffix(".prev.log"))
-    log_f = open(log_path, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", *args],
-        cwd=ROOT,
-        stdout=log_f,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,  # 與 WebUI 進程脫鉤，關頁面也不中斷
-    )
-    _PROCS[name] = proc
-    pid_path.write_text(str(proc.pid))
-    return True
+    # 鎖內完成「檢查 → 開檔 → Popen → 寫 pid」，避免並發雙啟動（TOCTOU）
+    with _start_lock:
+        if is_running(name):
+            return False
+        log_path, pid_path = _paths(name)
+        if log_path.exists():
+            # 保留上一輪輸出（含崩潰 traceback）供除錯，否則覆寫後死無對證
+            log_path.replace(log_path.with_suffix(".prev.log"))
+        log_f = open(log_path, "w", encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", *args],
+            cwd=ROOT,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,  # 與 WebUI 進程脫鉤，關頁面也不中斷
+        )
+        _PROCS[name] = proc
+        pid_path.write_text(str(proc.pid))
+        return True
 
 
 def is_running(name: str) -> bool:
@@ -83,7 +90,10 @@ def stop_job(name: str) -> bool:
     _, pid_path = _paths(name)
     if not is_running(name):
         return False
-    pid = int(pid_path.read_text().strip())
+    try:
+        pid = int(pid_path.read_text().strip())
+    except (ValueError, OSError):
+        return False  # pid 檔損毀/消失 → 視為停不掉，不裸拋 500
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
     except OSError:

@@ -114,16 +114,19 @@ export function StockBrowserModal({ onClose, onSelect }: {
     });
   }, [rows, q, market, industry, status]);
 
+  const pickReq = useRef(0);
   const pick = async (id: string) => {
+    const seq = ++pickReq.current;   // 只認最新一次點選的回應（丟棄過期回應）
     setPicked(id); setDetailLoading(true); setTab("overview"); setSeries(null);
     try {
       const [dt, sr] = await Promise.all([api.stockDetail(id), api.stockSeries(id)]);
+      if (seq !== pickReq.current) return;   // 期間又點了別檔 → 這份是舊回應，丟棄
       setDetail(dt); setSeries(sr as Record<string, Pt[]>);
     }
-    catch (e) { alert(String(e)); }
-    finally { setDetailLoading(false); }
+    catch (e) { if (seq === pickReq.current) alert(String(e)); }
+    finally { if (seq === pickReq.current) setDetailLoading(false); }
   };
-  const backToList = () => { setPicked(""); setDetail(null); setSeries(null); };
+  const backToList = () => { pickReq.current++; setPicked(""); setDetail(null); setSeries(null); };
   const showDetail = picked !== "";
   const d = detail;
   const f = d?.fundamental ?? {};

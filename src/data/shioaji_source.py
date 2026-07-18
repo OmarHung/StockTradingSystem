@@ -81,8 +81,14 @@ def get_contract(api, stock_id: str):
     return api.Contracts.Stocks[stock_id]
 
 
-def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
-    """抓某交易日全市場行情，篩 wanted_ids 寫入 price_daily。回傳寫入列數。
+def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str] | None) -> int:
+    """抓某交易日全市場行情寫入 price_daily。回傳寫入列數。
+
+    wanted_ids=None（全市場回補路徑）：寫入所有 4 碼數字代號（普通股＋ETF 的穩定
+    超集，排除權證/6 碼特殊證券），讓 sj_daily「該日全市場已補」標記語義成立——
+    股票池日後擴大（include_etf、解除下市、新上市）時，舊標記日的新成員才不會永缺；
+    股票池篩選（排除 ETF/下市）留在查詢層。
+    wanted_ids=集合（--stocks/--limit 部分回補）：只寫指定股票。
 
     DailyQuotes 是「欄向量」結構（column-oriented）：.Code/.Open/.Close 各是
     一條等長陣列，不能按列疊代（d[0] 會炸 'int' object is not 'str'）。
@@ -105,7 +111,11 @@ def fetch_daily_for_date(conn, date_str: str, wanted_ids: set[str]) -> int:
         "trading_money": list(q.Amount),
         "trading_turnover": list(q.Transaction),
     })
-    df = df[df["stock_id"].isin(wanted_ids) & (df["close"].astype(float) > 0)].copy()
+    alive = df["close"].astype(float) > 0
+    if wanted_ids is None:                       # 全市場：4 碼數字代號（普通股＋ETF）
+        df = df[df["stock_id"].str.fullmatch(r"\d{4}") & alive].copy()
+    else:
+        df = df[df["stock_id"].isin(wanted_ids) & alive].copy()
     if df.empty:
         return 0
     df["date"] = date_str

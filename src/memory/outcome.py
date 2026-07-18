@@ -48,16 +48,20 @@ def _evaluate_one(plan_row: dict, today: str) -> dict | None:
     """回傳 {outcome, ret} 或 None（資料不足/未到期）。"""
     p = json.loads(plan_row["plan_json"])["plan"]
     sid, as_of = plan_row["stock_id"], plan_row["as_of"]
-    px = q.get_price(sid, start=as_of, end=today, adjusted=True)
+    # 用原始價（非還原價）：計畫的 entry_high/stop_loss/target 是決策當日的名目價，
+    # 還原價會被 as_of 之後的除權息壓低整段窗口 → 觸價/成交判定與計畫不同框
+    # （fill_open 更易 ≤ entry_cap 誤判成交、low 更易 ≤ stop 誤判停損）。
+    px = q.get_price(sid, start=as_of, end=today, adjusted=False)
     after = px[px["date"] > as_of].reset_index(drop=True)
     if after.empty:
         return None
 
     action = p.get("action")
     if action != "buy" or not p.get("stop_loss") or not p.get("entry_high"):
-        # 非進場計畫：記錄假如報酬（horizon 或現有資料末端）
+        # 非進場計畫：記錄假如報酬。與 buy 計畫一致等滿 HORIZON——原本 min(,3)
+        # 恒等於 3 日就定案，把 3 日 watched 報酬與 20 日 buy 報酬混在一起餵反思。
         window = after.head(HORIZON_DAYS)
-        if len(window) < min(HORIZON_DAYS, 3):
+        if len(window) < HORIZON_DAYS:
             return None
         ret = float(window["close"].iloc[-1] / window["open"].iloc[0] - 1)
         return {"outcome": f"{action}_watched", "ret": round(ret, 4)}

@@ -27,6 +27,12 @@ log = get_logger(__name__)
 COST = CostModel()
 
 
+def _keep_higher(old, new) -> float | None:
+    """加碼合併停損/停利：取較高者，任一為 None 時保留另一個（None-safe max）。"""
+    vals = [float(v) for v in (old, new) if v is not None]
+    return max(vals) if vals else None
+
+
 class PaperBroker:
     def __init__(self):
         self.db_path = get_settings().db_path
@@ -211,14 +217,21 @@ class PaperBroker:
                         continue
                     cash -= amount + fee
                     # 建倉/加碼（加權平均成本）
-                    row = conn.execute("SELECT shares, avg_cost FROM positions WHERE stock_id=?",
-                                       (o["stock_id"],)).fetchone()
+                    row = conn.execute(
+                        "SELECT shares, avg_cost, stop_loss, target FROM positions WHERE stock_id=?",
+                        (o["stock_id"],)).fetchone()
                     if row:
                         total_sh = row[0] + o["shares"]
                         avg = (row[0] * row[1] + amount) / total_sh
+                        # 加碼不放寬既有部位的保護：停損取較高者（不下移，否則整個
+                        # 合併部位的風險被靜默放大，超出 Guard 對新增股數算的預算）；
+                        # 停利取較高者（新委託是加碼決策，朝更樂觀目標放行）；新單
+                        # 缺值時保留舊值（不讓 None 抹掉既有停損停利）。
+                        new_stop = _keep_higher(row[2], o["stop_loss"])
+                        new_tgt = _keep_higher(row[3], o["target"])
                         conn.execute("UPDATE positions SET shares=?, avg_cost=?, stop_loss=?, target=? "
                                      "WHERE stock_id=?",
-                                     (total_sh, avg, o["stop_loss"], o["target"], o["stock_id"]))
+                                     (total_sh, avg, new_stop, new_tgt, o["stock_id"]))
                     else:
                         conn.execute(
                             "INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, "
@@ -251,7 +264,7 @@ class PaperBroker:
             p = pos.to_dict(orient="records")[0]
             cash = float(self._get_state(conn, "cash", "0"))
             amount = p["shares"] * price
-            fee = COST.fee_rate * COST.fee_discount * amount
+            fee = max(COST.fee_rate * COST.fee_discount * amount, COST.min_fee)  # 最低 20 元
             tax = COST.tax_rate * amount
             pnl = (price - p["avg_cost"]) * p["shares"] - fee - tax
             cash += amount - fee - tax
@@ -290,7 +303,7 @@ class PaperBroker:
                 if exit_price is None:
                     continue
                 amount = p["shares"] * exit_price
-                fee = COST.fee_rate * COST.fee_discount * amount
+                fee = max(COST.fee_rate * COST.fee_discount * amount, COST.min_fee)  # 最低 20 元
                 tax = COST.tax_rate * amount
                 pnl = (exit_price - p["avg_cost"]) * p["shares"] - fee - tax
                 cash += amount - fee - tax

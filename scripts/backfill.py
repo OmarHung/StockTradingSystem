@@ -609,10 +609,23 @@ def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
     # 候選日期：TAIEX 交易日曆（新到舊；含日曆停更後的平日，見 _trading_dates_desc）
     cal = _trading_dates_desc(conn, start, end)
 
-    done: set[str] = set() if force else {
-        r[0] for r in conn.execute(
-            "SELECT stock_id FROM fetch_log WHERE dataset='sj_daily'").fetchall()
-    }
+    if force:
+        done: set[str] = set()
+    elif mark_dates:
+        # 全市場路徑：以全域 sj_daily 標記判斷缺日
+        done = {r[0] for r in conn.execute(
+            "SELECT stock_id FROM fetch_log WHERE dataset='sj_daily'").fetchall()}
+    else:
+        # 部分回補（--stocks/--limit）：全域 sj_daily 標記語義是「全市場該日已補」，
+        # 對指定少數股票不適用——沿用會讓已標記日全被跳過，--stocks 變 no-op。改以
+        # 「這批股票是否都已有該日資料」判缺，真正補齊使用者要的股票。
+        ph = ",".join("?" * len(wanted))
+        have = db.read_sql(
+            conn,
+            f"SELECT date, COUNT(DISTINCT stock_id) AS c FROM price_daily "
+            f"WHERE stock_id IN ({ph}) AND date>=? AND date<=? GROUP BY date",
+            tuple(wanted) + (start, end))
+        done = set(have[have["c"] >= len(wanted)]["date"]) if not have.empty else set()
     todo = [d for d in cal if d not in done]
     if not todo:
         log.info("shioaji 股價已是最新（無缺日）")
@@ -622,7 +635,9 @@ def _shioaji_price_backfill(conn, targets: list[str], start: str, end: str,
     total, filled = len(todo), 0
     for i, day in enumerate(todo):  # 新到舊（最新優先）
         try:
-            n = shioaji_source.fetch_daily_for_date(conn, day, wanted)
+            # 全市場（mark_dates）寫穩定超集讓標記為真；部分回補只寫指定股票
+            n = shioaji_source.fetch_daily_for_date(
+                conn, day, None if mark_dates else wanted)
         except Exception as e:  # noqa: BLE001 — 單日失敗不中斷、不標記完成
             log.error("shioaji 補 %s 失敗：%s", day, e)
             _emit_progress({"pass": "股價(shioaji)", "current": i + 1, "total": total,

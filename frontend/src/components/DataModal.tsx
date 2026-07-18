@@ -59,7 +59,11 @@ export function DataModal({ onClose }: { onClose: () => void }) {
   const startPolling = () => {
     if (poll.current) clearInterval(poll.current);
     poll.current = window.setInterval(async () => {
-      const s = await api.backfillStatus();
+      // 包 try/catch：API 暫時無回應（重啟中）時略過本輪，否則每 1.2 秒拋
+      // unhandled rejection 且狀態凍結在「執行中」（按鈕鎖死）；恢復後自動接上
+      let s;
+      try { s = await api.backfillStatus(); }
+      catch { return; }
       setRunning(s.running); setLog(s.log); setProg(s.progress);
       if (!s.running) {
         clearInterval(poll.current!); poll.current = null;

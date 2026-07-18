@@ -1,6 +1,8 @@
 """回測執行器：載入資料、產生選股訊號、跑策略、彙整績效。"""
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 
 from src.backtest import metrics
@@ -18,6 +20,15 @@ from src.logging_setup import get_logger
 from src.screener.screener import run_screener
 
 log = get_logger(__name__)
+
+# 暖身日曆天：載入 start 之前這麼多天的價格供指標 lookback（MA60/ATR）。
+# 60 交易日 ≈ 84 曆日，取 120 留假日緩衝——回測仍只從 start 起跑/計績效，
+# 但首個調倉日的 ctx.history 已有足夠歷史，不再首月全空手、MA60 濾網不再前 60 日失效。
+_WARMUP_DAYS = 120
+
+
+def _shift_back(date_str: str, days: int) -> str:
+    return (dt.date.fromisoformat(date_str) - dt.timedelta(days=days)).isoformat()
 
 
 def load_prices(stock_ids: list[str], start: str, end: str) -> dict[str, pd.DataFrame]:
@@ -72,18 +83,25 @@ def run_backtest(
     initial_cash = initial_cash or cfg["capital"]["total"]
     universe = universe or q.all_stock_ids()
     cost = CostModel()
+    warmup_start = _shift_back(start, _WARMUP_DAYS)   # 暖身：多載入 start 之前的歷史
 
     if strategy_name in ("buy_and_hold", "ma_cross"):
-        # 基準以 0050 為主；若資料庫無 0050 則取市值代表股
-        base = "0050" if "0050" in universe or "0050" in q.all_stock_ids() else universe[0]
-        prices = load_prices([base], start, end)
+        # 基準以 0050 為主（直接看有無價格資料，不繫於 all_stock_ids——它已排除 ETF）；
+        # 無 0050 則退用傳入池的第一檔為基準
+        base = "0050"
+        prices = load_prices([base], warmup_start, end)
+        if not prices:
+            base = universe[0]
+            prices = load_prices([base], warmup_start, end)
         strat = BuyAndHold(base) if strategy_name == "buy_and_hold" else MACrossover(base)
     elif strategy_name in ("screener", "screener_risk"):
         # TAIEX 一併載入（風控策略的大盤濾網用；不在選股池內）
-        prices = load_prices(universe + ["TAIEX"], start, end)
-        # 以月為調倉頻率
+        prices = load_prices(universe + ["TAIEX"], warmup_start, end)
+        # 以月為調倉頻率：月初日只從 [start, end] 窗內取（暖身區間僅供 lookback，
+        # 不參與月初判定，否則含 start 的當月月初落在暖身區、首次調倉被推遲一個月）
         all_days = sorted({d for df in prices.values() for d in df["date"]})
-        rebal = [d for d in _month_starts(all_days) if start <= d <= end]
+        window_days = [d for d in all_days if start <= d <= end]
+        rebal = _month_starts(window_days)
         log.info("Screener 回測：%d 個月調倉日", len(rebal))
         signals = generate_screener_signals(universe, rebal, cfg)
         if strategy_name == "screener_risk":

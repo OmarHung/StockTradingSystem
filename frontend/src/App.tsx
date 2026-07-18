@@ -86,7 +86,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [showNews, showBacktest, showBrowser, showData, showSettings]);
   useEffect(() => { api.watchlist().then(setWatchIds).catch(() => {}); }, []);
-  useEffect(() => { api.quote(selected).then((q) => setName(q.name)).catch(() => {}); }, [selected]);
+  // 快速切換 A→B 時，A 的慢回應不得覆蓋 B 的股名（否則標題顯示 B 代號配 A 名稱）
+  useEffect(() => {
+    let stale = false;
+    api.quote(selected).then((q) => { if (!stale) setName(q.name); }).catch(() => {});
+    return () => { stale = true; };
+  }, [selected]);
 
   // 自選加入/移除（後端落庫，回傳更新後清單）
   const isWatched = (id: string) => watchIds.includes(id);

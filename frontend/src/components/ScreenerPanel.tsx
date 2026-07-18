@@ -42,11 +42,20 @@ export function ScreenerPanel({
   const run = async () => {
     setLoading(true);
     setProg({ stage: "啟動中…", current: 0, total: 0 });
+    let fails = 0;
     try {
       await api.screenerStart(asOf, 30);   // 已在跑則直接接上輪詢
       for (;;) {
         await new Promise((r) => setTimeout(r, 500));
-        const st = await api.screenerStatus();
+        let st;
+        try {
+          st = await api.screenerStatus();
+          fails = 0;
+        } catch (e) {
+          // 單次輪詢失敗不放棄：選股仍在背景跑，連續失敗才收尾（避免誤報失敗）
+          if (++fails >= 10) throw e;
+          continue;
+        }
         setProg({ stage: st.stage, current: st.current, total: st.total });
         if (!st.running) {
           if (st.error) throw new Error(st.error);
@@ -69,7 +78,8 @@ export function ScreenerPanel({
               已保存 {savedAt.slice(0, 16).replace("T", " ")}
             </span>
           )}
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)}
+            disabled={loading} />
           <button className="btn primary" onClick={run} disabled={loading || !asOf}>執行</button>
         </div>
       }>

@@ -38,26 +38,56 @@ def is_configured() -> bool:
             and bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()))
 
 
+def _split_by_lines(text: str, limit: int) -> list[str]:
+    """把長訊息在「行邊界」切成多段（每段 ≤ limit）。單行超長才硬切，避免砍斷
+    <b>…</b>/<pre> 標籤造成 Telegram parse 400（越長＝交易越活躍的日子越容易中）。"""
+    chunks, buf = [], ""
+    for line in text.split("\n"):
+        if len(line) > limit:  # 極端單行：硬切（罕見，report 以行組裝）
+            if buf:
+                chunks.append(buf); buf = ""
+            for i in range(0, len(line), limit):
+                chunks.append(line[i:i + limit])
+            continue
+        if len(buf) + len(line) + 1 > limit:
+            chunks.append(buf); buf = line
+        else:
+            buf = f"{buf}\n{line}" if buf else line
+    if buf:
+        chunks.append(buf)
+    return chunks or [""]
+
+
+def _post(token: str, chat_id: str, text: str, parse_mode: str | None) -> dict:
+    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    r = requests.post(_API.format(token=token), json=payload, timeout=15)
+    try:
+        data = r.json()
+    except ValueError:
+        raise RuntimeError(f"Telegram API 回應異常（HTTP {r.status_code}）")
+    return data
+
+
 def send_message(text: str) -> None:
-    """發送 HTML 格式訊息到設定的 chat_id。失敗拋例外（含 API 錯誤描述）。"""
+    """發送 HTML 格式訊息到設定的 chat_id。失敗拋例外（含 API 錯誤描述）。
+
+    超過單則上限時在行邊界分段多則發送（不硬截斷砍斷標籤）；某段 HTML parse
+    失敗（如標題含未跳脫字元）時該段降級為純文字重送一次，不讓整份報告丟失。
+    """
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
     if not token:
         raise RuntimeError("未設定 TELEGRAM_BOT_TOKEN（.env）")
     if not chat_id:
         raise RuntimeError("未設定 TELEGRAM_CHAT_ID（.env）")
-    r = requests.post(_API.format(token=token), json={
-        "chat_id": chat_id,
-        "text": text[:_MAX_LEN],
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }, timeout=15)
-    try:
-        data = r.json()
-    except ValueError:
-        raise RuntimeError(f"Telegram API 回應異常（HTTP {r.status_code}）")
-    if not data.get("ok"):
-        raise RuntimeError(f"Telegram API 錯誤：{data.get('description') or r.text}")
+    for chunk in _split_by_lines(text, _MAX_LEN):
+        data = _post(token, chat_id, chunk, "HTML")
+        if not data.get("ok") and "parse" in str(data.get("description", "")).lower():
+            data = _post(token, chat_id, chunk, None)  # HTML 解析失敗 → 純文字重送
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegram API 錯誤：{data.get('description')}")
 
 
 def _money(v) -> str:

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -187,18 +188,27 @@ def _search_policy_news(model: str, as_of: str) -> str:
     messages: list[dict] = [{"role": "user", "content": user_msg}]
 
     resp = None
+    # 累加每次續跑的 token 用量：只記最後一個 response 會讓 web 偵察的成本統計
+    # 系統性低估為 0（中間各次 pause_turn 續跑完全沒計）。
+    agg = {"input_tokens": 0, "output_tokens": 0,
+           "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
     for _ in range(_MAX_CONTINUATIONS + 1):
         resp = client.messages.create(
             model=model, max_tokens=8000, system=system,
             messages=messages, tools=_WEB_TOOLS,
         )
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            for k in agg:
+                agg[k] += getattr(u, k, 0) or 0
         if resp.stop_reason != "pause_turn":
             break
         messages = [{"role": "user", "content": user_msg},
                     {"role": "assistant", "content": resp.content}]
 
     notes = "\n".join(b.text for b in resp.content if b.type == "text").strip()
-    llm._log_call("scout", model, user_msg, notes, None, as_of)  # noqa: SLF001
+    llm._log_call("scout", model, user_msg, notes, None, as_of,  # noqa: SLF001
+                  usage=SimpleNamespace(**agg))
     return notes
 
 

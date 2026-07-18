@@ -133,7 +133,6 @@ export function KChart({
     const load = intraday
       ? api.kbars(stockId, tfMin!, INTRADAY_DAYS[tf])
       : api.price(stockId, 250, tf, adjusted);
-    load.catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
 
     load.then((d) => {
       if (cancelled) return;
@@ -215,7 +214,8 @@ export function KChart({
           commitLive({ time: m.date, open: m.o, high: m.h, low: m.l, close: m.c }, m.v);
         }
       };
-    });
+    }).catch(() => { /* 載入失敗：保持空圖，不拋 unhandled rejection */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
     const onMove = (p: MouseEventParams) => {
       hovering = !!p.time;

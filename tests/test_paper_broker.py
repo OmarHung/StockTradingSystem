@@ -246,3 +246,34 @@ def test_target_gap_up_fills_at_open(broker):
         exits = broker.check_stops("2024-01-03")
     assert exits[0]["reason"] == "target"
     assert exits[0]["price"] == 120                   # 開盤價，非目標價 110
+
+
+def test_add_position_keeps_higher_stop(broker):
+    """加碼不下移保護：合併部位停損取較高者、停利取較高者，新單缺值保留舊值。"""
+    # 第一筆：停損 95、停利 115
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=95.0, target=115.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(100, 101, 99, 100)):
+        broker.execute_pending("2024-01-02")
+    # 第二筆加碼：停損較低 90（不該覆蓋）、停利較高 130（採用）
+    broker.place_buy("2024-01-02", "9999", 1000, limit_price=105.0,
+                     stop_loss=90.0, target=130.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(103, 104, 102, 103)):
+        broker.execute_pending("2024-01-03")
+    pos = broker.positions().iloc[0]
+    assert float(pos["stop_loss"]) == 95.0    # 保留較高停損（不下移保護位）
+    assert float(pos["target"]) == 130.0      # 採較高停利
+    assert int(pos["shares"]) == 2000
+
+
+def test_sell_fee_min_20(broker):
+    """賣出手續費套最低 20 元（小額出場不被低估，與 CostModel/回測一致）。"""
+    with db.connect(broker.db_path) as conn:
+        # 極小額持股：1 股 @10 元，賣出金額 10 元 → 手續費理論值 0.014 元，應夾到 20
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, opened_at) "
+                     "VALUES ('9999', 1, 10.0, 9.0, 20.0, '2024-01-01')")
+    r = broker.intraday_exit("2024-01-05", "9999", 9.0, "stop_intraday")
+    fee = broker.fills().iloc[0]["fee"]
+    assert float(fee) == 20.0
+    # pnl 已扣最低手續費（賣 9 元 - 成本 10 元 - 費 20 - 稅）
+    assert r["pnl"] < 0

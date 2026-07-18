@@ -74,7 +74,18 @@ def analyze_stock(stock_id: str, as_of: str, source: str = "screener",
 
     # 5) 交易員綜合決策
     step("交易員決策")
-    plan = trader.run_trader(stock_id, as_of, bundle, tech_feats)
+    if not tech_feats.get("close"):
+        # 技術面是價格計畫的唯一 ground truth：缺當日收盤價時，交易員只能靠 LLM
+        # 訓練記憶中的舊股價編造 entry/stop/target（Guard 不比對現價、擋不住），
+        # 買到就用幻覺價管理部位。直接強制觀望，不送 LLM 產幻覺價。
+        from src.llm.schemas import TradePlan
+        plan = TradePlan(
+            action="avoid", action_score=0.0, confidence=0.0,
+            rationale="技術面資料缺席（無當日收盤價），無價格基準可訂進出場計畫，強制觀望。",
+            risks=["技術面分析失敗，缺乏價格 ground truth"])
+        log.warning("%s 技術面無收盤價，跳過交易員、強制 avoid", stock_id)
+    else:
+        plan = trader.run_trader(stock_id, as_of, bundle, tech_feats)
 
     record = {
         "as_of": as_of, "stock_id": stock_id, "source": source,
@@ -162,8 +173,14 @@ def analyze_stocks(stock_ids: list[str], as_of: str,
             def on_step(label, _sid=sid, _i=i):
                 progress(f"分析 {_sid} · {label}", _i + 1, total)
             on_step("啟動")
-        rec = analyze_stock(sid, as_of, source=(sources or {}).get(sid, "screener"),
-                            on_step=on_step)
+        # 單檔失敗（交易員/Guard/存檔例外、DB 鎖）只跳過該檔，不讓整批選股報告
+        # 陪葬（與 daily._decide_one 的逐檔隔離對齊；已完成的照常回傳）
+        try:
+            rec = analyze_stock(sid, as_of, source=(sources or {}).get(sid, "screener"),
+                                on_step=on_step)
+        except Exception:  # noqa: BLE001
+            log.exception("分析 %s 失敗（跳過該檔）", sid)
+            rec = None
         if rec:
             out.append(rec)
     return out

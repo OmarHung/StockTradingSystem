@@ -417,12 +417,20 @@ def get_revenue_bulk(stock_ids: list[str], as_of: str) -> pd.DataFrame:
 
 
 def all_stock_ids() -> list[str]:
-    """已有價格資料的個股清單（排除大盤指數，避免混入選股池）。"""
+    """選股股票池：上市櫃普通股（與 top_volume_ids 同口徑的結構性過濾）。
+
+    排除指數、ETF（00 開頭）、已下市與非四碼普通股——否則 ETF 與下市股會混入
+    all 模式選股池（尤其 price_daily 現以全市場超集入庫，見 shioaji_source
+    fetch_daily_for_date）。ETF/下市的篩除留在此處，供選股與回測共用。
+    """
     with db.connect(_db_path()) as conn:
         df = db.read_sql(
             conn,
-            "SELECT DISTINCT stock_id FROM price_daily "
-            "WHERE stock_id NOT IN ('TAIEX','TPEx') ORDER BY stock_id",
+            "SELECT DISTINCT p.stock_id FROM price_daily p "
+            "JOIN stock_info s ON s.stock_id = p.stock_id "
+            "WHERE s.type IN ('twse','tpex') AND COALESCE(s.delisted,0)=0 "
+            "AND p.stock_id GLOB '[0-9][0-9][0-9][0-9]' AND p.stock_id NOT LIKE '00%' "
+            "ORDER BY p.stock_id",
         )
     return df["stock_id"].tolist()
 
