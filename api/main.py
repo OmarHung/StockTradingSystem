@@ -65,6 +65,23 @@ def _spawn_bg(coro):
 
 
 @app.on_event("startup")
+async def _check_timezone():
+    """時區防護：全後端用 naive datetime，隱含假設主機時區為 Asia/Taipei（UTC+8 無 DST）。
+    時區設錯會讓排程/撮合/盤中判斷全部靜默跑錯，但不拒絕啟動——只發醒目 WARNING。
+    """
+    import datetime as _dt
+    off = _dt.datetime.now().astimezone().utcoffset()
+    # 台北全年固定 UTC+8、無日光節約；只要偏移不是 +8 即視為設錯
+    if off != _dt.timedelta(hours=8):
+        log.warning(
+            "主機時區非 Asia/Taipei（目前 UTC offset=%s，應為 +08:00）！"
+            "全後端使用 naive datetime，時區設錯會導致排程觸發時間、撮合與盤中判斷"
+            "全部靜默跑錯。請執行：sudo timedatectl set-timezone Asia/Taipei",
+            off,
+        )
+
+
+@app.on_event("startup")
 async def _start_scheduler():
     """後端內建排程器（取代 launchd）：asyncio 常駐迴圈，觸發走 jobs.py 子行程。"""
     from src import scheduler
@@ -972,11 +989,12 @@ def scheduler_config(req: SchedulerConfigReq):
         assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
     except (ValueError, AssertionError):
         raise HTTPException(400, "時間格式須為 HH:MM（24 小時制）")
-    raw = config_io.load_raw()
-    raw.setdefault("scheduler", {}).setdefault(req.name, {})
-    raw["scheduler"][req.name]["enabled"] = req.enabled
-    raw["scheduler"][req.name]["time"] = req.time
-    config_io.save_raw(raw)
+    with config_io.LOCK:  # load→改→save 須原子，與其他設定端點共用同一把鎖避免互相覆蓋
+        raw = config_io.load_raw()
+        raw.setdefault("scheduler", {}).setdefault(req.name, {})
+        raw["scheduler"][req.name]["enabled"] = req.enabled
+        raw["scheduler"][req.name]["time"] = req.time
+        config_io.save_raw(raw)
     return {"saved": True}
 
 

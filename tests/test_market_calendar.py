@@ -86,6 +86,44 @@ def test_sync_idempotent(cal):
     assert n == 3
 
 
+def test_ensure_synced_populates_uncovered_years(cal):
+    # 全新安裝：假日表未入庫，ensure_synced 主動同步指定年度
+    with patch("src.data.market_calendar.requests.get", return_value=_FakeResp(_SAMPLE)):
+        cal.ensure_synced(2026)
+    with db.connect(cal.get_settings().db_path) as conn:
+        assert conn.execute("SELECT 1 FROM fetch_log WHERE dataset='twse_holiday' "
+                            "AND stock_id='2026'").fetchone()
+
+
+def test_ensure_synced_fail_open_on_network_error(cal):
+    # 無網路：同步失敗只記 WARNING、不拋出，呼叫端（排程迴圈）不被卡死
+    with patch("src.data.market_calendar.requests.get",
+               side_effect=OSError("no network")):
+        cal.ensure_synced(2026)   # 不應拋例外
+    with db.connect(cal.get_settings().db_path) as conn:
+        assert conn.execute("SELECT 1 FROM fetch_log WHERE dataset='twse_holiday' "
+                            "AND stock_id='2026'").fetchone() is None
+
+
+def test_ensure_synced_retry_reattempts_failed_year(cal):
+    # 啟動時失敗（無網路）→ 每行程每年只試一次；retry=True 可重試先前失敗年度
+    with patch("src.data.market_calendar.requests.get",
+               side_effect=OSError("no network")):
+        cal.ensure_synced(2026)
+    # 不帶 retry：年度已在 _sync_attempted，不再打網路（維持既有 lazy 契約）
+    with patch("src.data.market_calendar.requests.get",
+               return_value=_FakeResp(_SAMPLE)) as g:
+        cal.ensure_synced(2026)
+        assert g.call_count == 0
+    # retry=True：清掉未覆蓋年度標記後重試，成功入庫
+    with patch("src.data.market_calendar.requests.get",
+               return_value=_FakeResp(_SAMPLE)):
+        cal.ensure_synced(2026, retry=True)
+    with db.connect(cal.get_settings().db_path) as conn:
+        assert conn.execute("SELECT 1 FROM fetch_log WHERE dataset='twse_holiday' "
+                            "AND stock_id='2026'").fetchone()
+
+
 def test_status(cal):
     with patch("src.data.market_calendar.requests.get", return_value=_FakeResp(_SAMPLE)):
         cal.sync_holidays()

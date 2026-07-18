@@ -1,6 +1,7 @@
 """PaperBroker 單元測試：撮合/失效/停損/停利/損益/權益快照（temp DB + 假價格）。"""
 from __future__ import annotations
 
+import datetime as dt
 from unittest.mock import patch
 
 import pandas as pd
@@ -276,6 +277,99 @@ def test_portfolio_state_reflects_pending_orders(broker):
     assert abs((1_000_000 - ps.cash) - (100_000 + 100_000 * 0.001425)) < 1.0
     # pending 檔位計入 positions（供 max_positions/single-position/重複偵測）
     assert "2330" in ps.positions and ps.positions["2330"].shares == 1000
+
+
+def _add_dividend(broker, stock_id, date, before, after):
+    """寫一筆除權息事件（gap = before - after）。"""
+    with db.connect(broker.db_path) as conn:
+        conn.execute(
+            "INSERT INTO dividend (stock_id, date, before_price, after_price, dividend, kind) "
+            "VALUES (?,?,?,?,?, '息')",
+            (stock_id, date, before, after, before - after))
+
+
+def test_ex_dividend_adjusts_stop_no_false_stop(broker):
+    """抱過除息日：raw 價跳空下跌約當息值，停損/停利同步下修，不誤觸假停損。
+
+    1307 情境：決策尺度 stop=95、target=115；除息日跳空 3.0（before 100→after 97）。
+    除息日 raw low 96（>調整後停損 92），不該觸損；停損/停利各下修 3.0。
+    """
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, "
+                     "opened_at, ex_adj_date) VALUES ('1307', 1000, 98.0, 95.0, 115.0, "
+                     "'2024-01-02', '2024-01-02')")
+    _add_dividend(broker, "1307", "2024-01-05", before=100.0, after=97.0)  # gap 3.0
+    # 除息日 raw：open 97、low 96（若不校正，96 > 95 剛好不觸，但改用更貼近的門檻驗證）
+    with patch("src.broker.paper.q.get_price", return_value=_px(97, 98, 93, 96)):
+        exits = broker.check_stops("2024-01-05")
+    # 未調整時 low 93 ≤ 停損 95 會誤觸；調整後停損 92 → low 93 > 92，不觸損
+    assert exits == []
+    pos = broker.positions().iloc[0]
+    assert float(pos["stop_loss"]) == pytest.approx(92.0)
+    assert float(pos["target"]) == pytest.approx(112.0)
+    assert pos["ex_adj_date"] == "2024-01-05"
+
+
+def test_ex_dividend_adjust_idempotent(broker):
+    """同一除息日重複跑 check_stops 不重複扣息（冪等）。"""
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, "
+                     "opened_at, ex_adj_date) VALUES ('1307', 1000, 98.0, 95.0, 115.0, "
+                     "'2024-01-02', '2024-01-02')")
+    _add_dividend(broker, "1307", "2024-01-05", before=100.0, after=97.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(97, 99, 96, 98)):
+        broker.check_stops("2024-01-05")
+        broker.check_stops("2024-01-05")   # 重跑
+        broker.check_stops("2024-01-08")   # 之後的交易日再跑
+    pos = broker.positions().iloc[0]
+    assert float(pos["stop_loss"]) == pytest.approx(92.0)   # 只扣一次 3.0
+    assert float(pos["target"]) == pytest.approx(112.0)
+
+
+def test_fresh_fill_on_ex_date_not_adjusted(broker):
+    """除息日當天成交建倉：進場價已是 raw 除息後價，stop/target 不得再被重扣。"""
+    broker.place_buy("2024-01-04", "1307", 1000, limit_price=100.0,
+                     stop_loss=92.0, target=112.0)
+    _add_dividend(broker, "1307", "2024-01-05", before=100.0, after=97.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(97, 98, 96, 97)):
+        broker.execute_pending("2024-01-05")   # 除息日開盤 97 ≤ 限價 100 → 成交
+        exits = broker.check_stops("2024-01-05")
+    assert exits == []
+    pos = broker.positions().iloc[0]
+    assert float(pos["stop_loss"]) == pytest.approx(92.0)   # 未被重扣
+    assert float(pos["target"]) == pytest.approx(112.0)
+    assert pos["ex_adj_date"] == "2024-01-05"
+
+
+def test_positions_returns_ex_dividend_adjusted_stop(broker):
+    """盤中路徑：positions() 返回的 stop/target 已套用除息名目跳空調整。
+
+    盤中停損監控（intraday_monitor）在收盤 check_stops 之前即讀 positions() 的 stop
+    對照 raw 快照 low 判觸價；除息日當天若不同步，會把配息跳空誤判成觸損。
+    1307：決策尺度 stop=95、target=115；除息跳空 3.0 → 返回值應為 92 / 112。
+    在記憶體內就地下修、不回寫 DB（check_stops 才是回寫 ex_adj_date 的權威路徑）。
+    """
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, "
+                     "opened_at, ex_adj_date) VALUES ('1307', 1000, 98.0, 95.0, 115.0, "
+                     "'2024-01-02', '2024-01-02')")
+    _add_dividend(broker, "1307", "2024-01-05", before=100.0, after=97.0)  # gap 3.0
+
+    # 監控用 today 為界撈除息事件；把 today 固定成除息日之後（不動 dt.date 其餘行為）
+    class _FrozenDate(dt.date):
+        @classmethod
+        def today(cls):
+            return dt.date(2024, 1, 8)
+
+    with patch("src.broker.paper.dt.date", _FrozenDate):
+        pos = broker.positions().iloc[0]
+    assert float(pos["stop_loss"]) == pytest.approx(92.0)   # 若不校正監控會拿 95 誤觸
+    assert float(pos["target"]) == pytest.approx(112.0)
+    # DB 未被回寫（純讀）：ex_adj_date 仍為建倉日，stop 仍為原值
+    with db.connect(broker.db_path) as conn:
+        raw = db.read_sql(conn, "SELECT stop_loss, ex_adj_date FROM positions").iloc[0]
+    assert float(raw["stop_loss"]) == pytest.approx(95.0)
+    assert raw["ex_adj_date"] == "2024-01-02"
 
 
 def test_sell_fee_min_20(broker):

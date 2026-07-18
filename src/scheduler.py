@@ -224,13 +224,34 @@ def _due(name: str, spec_cfg: dict, now: dt.datetime) -> bool:
     return st["attempts"] < _MAX_ATTEMPTS
 
 
+async def _ensure_calendar_synced() -> None:
+    """主動同步當年度＋次年度假日表（走 allow_fetch=True 路徑），避免 _due 純查 DB
+    時把未入庫的國定假日誤判為交易日而空觸發 job。
+
+    ensure_synced 內含 requests 阻塞呼叫，丟到 executor 免卡 asyncio 迴圈；
+    無網路等失敗 ensure_synced 內部已 fail-open（只記 WARNING），不影響排程。
+    """
+    try:
+        # retry=True：先前失敗（啟動時無網路）的年度於每日首檢可重試；已入庫不重打
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: mcal.ensure_synced(retry=True))
+    except Exception as e:  # noqa: BLE001
+        log.warning("假日表同步失敗（照舊 fail-open，排程續行）：%s", str(e)[:100])
+
+
 async def run_loop(interval_sec: int = 30) -> None:
     """常駐檢查迴圈（FastAPI startup 啟動）。單一 API 行程內執行。"""
     log.info("內建排程器啟動（每 %d 秒檢查；設定見 settings.yaml scheduler 區塊）", interval_sec)
+    # 啟動即同步一次；之後每逢新的一天首檢再同步（跨年後補次年、當年表更新）
+    await _ensure_calendar_synced()
+    synced_date = dt.date.today().isoformat()
     while True:
         try:
             cfg = _cfg()
             now = dt.datetime.now()
+            if now.date().isoformat() != synced_date:
+                synced_date = now.date().isoformat()
+                await _ensure_calendar_synced()
             for name in JOB_DEFS:
                 if name not in cfg or not _due(name, cfg[name], now):
                     continue

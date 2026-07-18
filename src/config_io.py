@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -19,30 +20,39 @@ _yaml = YAML()
 _yaml.preserve_quotes = True
 _yaml.indent(mapping=2, sequence=4, offset=2)
 
+# 全域讀-改-寫序列化鎖：.env / settings.yaml 的載入/存檔跑在 Starlette threadpool
+# 可真併發，無鎖的 read→改→write 會互相覆蓋讓某項設定/金鑰靜默遺失。
+# 用 RLock 因為 update_section 內部會呼叫 load_raw/save_raw（可重入）；外部需要把
+# load→改→save 併成一個原子序列（如 api 的 scheduler_config）時可 `with config_io.LOCK:`。
+LOCK = threading.RLock()
+
 
 def load_raw(path: str | Path = DEFAULT_SETTINGS_PATH):
     """回傳 ruamel 的 CommentedMap（可當一般 dict 用，但保留註解）。"""
-    with open(path, "r", encoding="utf-8") as f:
-        return _yaml.load(f)
+    with LOCK:
+        with open(path, "r", encoding="utf-8") as f:
+            return _yaml.load(f)
 
 
 def save_raw(data, path: str | Path = DEFAULT_SETTINGS_PATH) -> None:
-    path = Path(path)
-    tmp = path.with_suffix(".yaml.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        _yaml.dump(data, f)
-    os.replace(tmp, path)
-    get_settings.cache_clear()  # 讓下次 get_settings() 讀到新值
+    with LOCK:
+        path = Path(path)
+        tmp = path.with_suffix(".yaml.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            _yaml.dump(data, f)
+        os.replace(tmp, path)
+        get_settings.cache_clear()  # 讓下次 get_settings() 讀到新值
 
 
 def update_section(section: str, values: dict, path: str | Path = DEFAULT_SETTINGS_PATH) -> None:
     """更新某個頂層區塊（淺層合併）並存檔，保留原有註解。"""
-    data = load_raw(path)
-    if section not in data or data[section] is None:
-        data[section] = {}
-    for k, v in values.items():
-        data[section][k] = v
-    save_raw(data, path)
+    with LOCK:  # 整個 load→改→save 序列須原子，避免與其他寫入交錯覆蓋
+        data = load_raw(path)
+        if section not in data or data[section] is None:
+            data[section] = {}
+        for k, v in values.items():
+            data[section][k] = v
+        save_raw(data, path)
 
 
 def set_env_var(key: str, value: str, path: str | Path = ENV_PATH) -> None:
@@ -55,17 +65,18 @@ def set_env_var(key: str, value: str, path: str | Path = ENV_PATH) -> None:
         raise ValueError("環境變數的名稱/值不可含換行或控制字元")
     if "=" in key or not key.strip():
         raise ValueError("環境變數名稱不合法")
-    path = Path(path)
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    out, found = [], False
-    for ln in lines:
-        if ln.strip().startswith(f"{key}=") or ln.strip().startswith(f"{key} ="):
+    with LOCK:  # read→改→write 非原子，須整段序列化避免併發覆蓋
+        path = Path(path)
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        out, found = [], False
+        for ln in lines:
+            if ln.strip().startswith(f"{key}=") or ln.strip().startswith(f"{key} ="):
+                out.append(f"{key}={value}")
+                found = True
+            else:
+                out.append(ln)
+        if not found:
             out.append(f"{key}={value}")
-            found = True
-        else:
-            out.append(ln)
-    if not found:
-        out.append(f"{key}={value}")
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
-    os.environ[key] = value  # 立即生效（同進程）
-    get_settings.cache_clear()
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        os.environ[key] = value  # 立即生效（同進程）
+        get_settings.cache_clear()

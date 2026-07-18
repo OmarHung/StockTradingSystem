@@ -54,6 +54,56 @@ def test_fetch_tpex_dividends_range_parses_exdailyq(conn):
     assert dividend == 7.0 and kind == "除息"
 
 
+def _tpex_inst_fixture():
+    """TPEx dailyTrade 24 欄佈局（實測結構）：0代號 1名稱｜三組 買/賣/淨 ×8｜末欄合計。
+    兩列皆自洽（買-賣=淨；外資合計+投信+自營合計=末欄合計）。"""
+    fields = (["代號", "名稱"]
+              + ["買進股數", "賣出股數", "買賣超股數"] * 7
+              + ["三大法人買賣超股數合計"])
+    data = [
+        # 2-4 外資陸資 | 5-7 外資自營 | 8-10 外資合計 | 11-13 投信 |
+        # 14-16 自營自行 | 17-19 自營避險 | 20-22 自營合計 | 23 合計
+        ["2330", "台積電",
+         "1,000", "400", "600",   "0", "0", "0",   "1,000", "400", "600",
+         "300", "100", "200",   "50", "20", "30",   "10", "5", "5",   "60", "25", "35",
+         "835"],
+        ["00679B", "元大美債20年",
+         "500", "500", "0",   "0", "0", "0",   "500", "500", "0",
+         "0", "0", "0",   "20", "10", "10",   "0", "0", "0",   "20", "10", "10",
+         "10"],
+    ]
+    return {"tables": [{"title": "三大法人買賣明細資訊", "fields": fields, "data": data}]}
+
+
+def test_fetch_tpex_institutional_parses_groups(conn):
+    fixture = _tpex_inst_fixture()
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = fixture
+    with patch.object(twse_source, "_get_json", return_value=fixture), \
+         patch.object(twse_source.time, "sleep"):
+        n = twse_source.fetch_tpex_institutional(conn, "2026-07-03")
+    assert n == 6  # 2 檔 × 3 群組
+    r = conn.execute("SELECT name, buy, sell FROM institutional "
+                     "WHERE stock_id='2330' ORDER BY name").fetchall()
+    assert r == [("Dealer_self", 50, 20),
+                 ("Foreign_Investor", 1000, 400),
+                 ("Investment_Trust", 300, 100)]
+
+
+def test_fetch_tpex_institutional_rejects_drifted_layout(conn):
+    """欄序漂移（買-賣≠淨）時整批跳過、不寫入猜測值。"""
+    fixture = _tpex_inst_fixture()
+    for row in fixture["tables"][0]["data"]:
+        row[2], row[4] = row[4], row[2]  # 破壞 外資 買-賣=淨 冗餘關係
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = fixture
+    with patch.object(twse_source, "_get_json", return_value=fixture), \
+         patch.object(twse_source.time, "sleep"):
+        n = twse_source.fetch_tpex_institutional(conn, "2026-07-03")
+    assert n == 0
+    assert conn.execute("SELECT COUNT(*) FROM institutional").fetchone()[0] == 0
+
+
 def test_fetch_twse_valuation_parses_fields(conn):
     fixture = {
         "stat": "OK",

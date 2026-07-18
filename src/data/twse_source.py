@@ -167,26 +167,55 @@ def fetch_tpex_institutional(conn, date_iso: str) -> int:
     if not tables or not tables[0].get("data"):
         return 0
     data = tables[0]["data"]
-    # 欄位重複名（外資/投信/自營各一組買進/賣出/買賣超），按群組位置取：
-    # 0代號 1名稱 | 2-4 外資(買/賣/淨) ... 投信與自營位置依欄數推（歷年欄數不同，防禦性處理）
+    # 欄位全為匿名重複名（外資/投信/自營各組「買進股數/賣出股數/買賣超股數」），
+    # 按名對照不可行——只能按群組位置解析。實測（2020-2025 穩定）24 欄佈局：
+    #   0代號 1名稱
+    #   2-4  外資及陸資(不含外資自營)  5-7  外資自營  8-10 外資合計
+    #   11-13 投信                    14-16 自營自行  17-19 自營避險
+    #   20-22 自營合計                23   三大法人買賣超合計
+    # 下游只需外資陸資/投信/自營自行三組買進、賣出（對齊 T86 命名慣例）。
+    groups = [("Foreign_Investor", 2, 3), ("Investment_Trust", 11, 12),
+              ("Dealer_self", 14, 15)]
     ncol = len(data[0])
-    # 常見版型：外資及陸資(不含自營) 2-4、外資自營 5-7、外資合計 8-10、投信 11-13、
-    # 自營自行 14-16、自營避險 17-19…；較舊版可能沒有細分。取保守對照：
-    if ncol >= 14:
-        groups = [("Foreign_Investor", 2, 3), ("Investment_Trust", 11, 12),
-                  ("Dealer_self", 14, 15)]
-    else:  # 精簡版型：外資 2-4、投信 5-7、自營 8-10
-        groups = [("Foreign_Investor", 2, 3), ("Investment_Trust", 5, 6),
-                  ("Dealer_self", 8, 9)]
-    rows = []
+
+    # 防呆：位置解析無名稱可核對，改用該表冗餘欄位做算術驗證，確認欄序未漂移。
+    # 每組「買進-賣出=買賣超」（淨額欄緊接賣出欄）＋末欄「三大法人合計」＝
+    # 外資合計(10)+投信(13)+自營合計(22)。抽樣多列取交集判定，容忍個別髒列。
+    def _row_layout_ok(row) -> bool:
+        if len(row) < 24:
+            return False
+        for _, bi, si in groups:
+            if _num(row[bi]) - _num(row[si]) != _num(row[si + 1]):
+                return False
+        return _num(row[10]) + _num(row[13]) + _num(row[22]) == _num(row[23])
+
+    # 抽樣全部有效個股列做算術驗證：官方值內部自洽時應近乎全通過；欄序漂移則幾乎全敗。
+    # 用通過比例判定（門檻 90%），容忍個別髒列又能揪出改版；一列都驗不到亦視為異常。
+    checked = passed = 0
+    bad_sample = None
     for row in data:
         sid = str(row[0]).strip()
         if not sid or len(sid) > 6:
             continue
+        checked += 1
+        if _row_layout_ok(row):
+            passed += 1
+        elif bad_sample is None:
+            bad_sample = row[:24]
+    if checked == 0 or passed < checked * 0.9:
+        log.warning("TPEx 三大法人 %s 欄序驗證失敗（ncol=%d，通過 %d/%d，樣本壞列=%s）"
+                    "——疑官方改版，整批跳過不寫入",
+                    date_iso, ncol, passed, checked, bad_sample)
+        return 0
+
+    rows = []
+    for row in data:
+        sid = str(row[0]).strip()
+        if not sid or len(sid) > 6 or len(row) < 24:
+            continue
         for name, bi, si in groups:
-            if si < len(row):
-                rows.append({"stock_id": sid, "date": date_iso, "name": name,
-                             "buy": _num(row[bi]), "sell": _num(row[si])})
+            rows.append({"stock_id": sid, "date": date_iso, "name": name,
+                         "buy": _num(row[bi]), "sell": _num(row[si])})
     return db.upsert_dataframe(conn, "institutional", pd.DataFrame(rows))
 
 

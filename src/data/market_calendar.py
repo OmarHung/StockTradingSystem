@@ -108,6 +108,26 @@ def _maybe_sync(conn, year: int) -> None:
         log.warning("假日表 lazy 同步失敗（退回平日判斷）：%s", str(e)[:100])
 
 
+def ensure_synced(*years: int, retry: bool = False) -> None:
+    """確保指定年度假日表已入庫（排程器啟動/每日首檢時主動呼叫）。
+
+    走 allow_fetch=True 的 _maybe_sync 路徑：僅補未覆蓋年度、每行程每年只試一次、
+    失敗只記 WARNING 不拋出——呼叫端（排程迴圈）不會因無網路而卡死或中斷。
+    未帶參數則預設補當年度＋次年度（涵蓋跨年前後的年底掛單/排程判斷）。
+    retry=True：清掉未覆蓋年度的「已試過」標記，讓先前失敗（如啟動時無網路）的
+    同步能於下次呼叫（排程每日首檢）重試——已入庫年度不受影響、不會重打網路。
+    """
+    if not years:
+        y = dt.date.today().year
+        years = (y, y + 1)
+    with db.connect(get_settings().db_path) as conn:
+        _ensure_tables(conn)
+        for year in years:
+            if retry and not _covered(conn, year):
+                _sync_attempted.discard(year)
+            _maybe_sync(conn, year)
+
+
 def is_trading_day(date_str: str, allow_fetch: bool = True) -> bool:
     """date_str（YYYY-MM-DD）是否為台股交易日。
 

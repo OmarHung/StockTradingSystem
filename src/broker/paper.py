@@ -33,6 +33,35 @@ def _keep_higher(old, new) -> float | None:
     return max(vals) if vals else None
 
 
+def _ex_gap_events(conn, sid: str, after: str, upto: str) -> list[tuple[str, float]]:
+    """回傳 [(除息日, gap)]：after(不含)~upto(含) 間各除權息名目跳空（gap=before-after）。
+
+    名目價撮合下，除息當日 raw open/low 較前收跳空下跌約當息值，會誤觸停損/成交；
+    比照真實券商在除息日對條件單同步下修息值。gap<=0（除權配股不降或資料異常）略過。
+    dividend 為同日事件權威來源，capital_change 只補非除權息公司行動（與 query/outcome 一致）。
+    """
+    rows = db.read_sql(
+        conn,
+        "SELECT date, before_price, after_price FROM dividend "
+        "WHERE stock_id=? AND date>? AND date<=? "
+        "AND before_price>0 AND after_price>0 "
+        "UNION ALL "
+        "SELECT c.date, c.before_price, c.after_price FROM capital_change c "
+        "WHERE c.stock_id=? AND c.date>? AND c.date<=? "
+        "AND c.before_price>0 AND c.after_price>0 "
+        "AND NOT EXISTS (SELECT 1 FROM dividend d "
+        "                WHERE d.stock_id=c.stock_id AND d.date=c.date) "
+        "ORDER BY date",
+        (sid, after, upto, sid, after, upto),
+    )
+    out: list[tuple[str, float]] = []
+    for _, ev in rows.iterrows():
+        gap = float(ev["before_price"]) - float(ev["after_price"])
+        if gap > 0:
+            out.append((str(ev["date"]), gap))
+    return out
+
+
 class PaperBroker:
     def __init__(self):
         self.db_path = get_settings().db_path
@@ -46,6 +75,11 @@ class PaperBroker:
             if row is None:
                 conn.execute("INSERT INTO broker_state (key, value) VALUES ('cash', ?)", (str(cap),))
                 conn.execute("INSERT OR REPLACE INTO broker_state (key, value) VALUES ('start_capital', ?)", (str(cap),))
+            # 除權息條件單調整標記：記已對該持倉套用過息值調整的最後除息日。
+            # 自查補欄（database._migrate 不歸本組管，這裡冪等補上舊帳本缺的欄）。
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(positions)").fetchall()]
+            if cols and "ex_adj_date" not in cols:
+                conn.execute("ALTER TABLE positions ADD COLUMN ex_adj_date TEXT")
 
     def _get_state(self, conn, key: str, default: str | None = None) -> str | None:
         row = conn.execute("SELECT value FROM broker_state WHERE key=?", (key,)).fetchone()
@@ -69,8 +103,31 @@ class PaperBroker:
 
     # ---------- 查詢 ----------
     def positions(self) -> pd.DataFrame:
+        # 返回的 stop_loss/target 已套用「截至今日」的除權息名目跳空調整。
+        # 盤中停損監控（intraday_monitor）在盤中即讀本方法的 stop_loss，對照 shioaji
+        # raw 快照 low 判觸價，且早於收盤 check_stops 發生——除息日當天若不同步，監控會
+        # 拿「決策當日尺度」的停損去比「已除息跳空下跌」的 raw low，把配息名目跳空誤判
+        # 成觸損砍出假虧損。此處與 check_stops 同口徑（_ex_gap_events），但只在記憶體內
+        # 就地下修返回值、不回寫 DB：positions() 為純讀，避免每 30 秒輪詢造成鎖競爭，
+        # 也避免歷史重放時以 today 為界誤扣掉 as_of 之後才發生的除息（check_stops 才是
+        # 唯一以正確 as_of 回寫 ex_adj_date 的權威路徑）。
         with db.connect(self.db_path) as conn:
-            return db.read_sql(conn, "SELECT * FROM positions ORDER BY stock_id")
+            pos = db.read_sql(conn, "SELECT * FROM positions ORDER BY stock_id")
+            if pos.empty:
+                return pos
+            today = dt.date.today().isoformat()
+            for idx, p in pos.iterrows():
+                after = max(p.get("ex_adj_date") or "", p.get("opened_at") or "")
+                if not after:   # 無安全基準日 → 不動（避免誤扣整段歷史除息）
+                    continue
+                total_gap = sum(g for _, g in _ex_gap_events(conn, p["stock_id"], after, today))
+                if total_gap <= 0:
+                    continue
+                if pos.at[idx, "stop_loss"] is not None and pd.notna(pos.at[idx, "stop_loss"]):
+                    pos.at[idx, "stop_loss"] = float(pos.at[idx, "stop_loss"]) - total_gap
+                if pos.at[idx, "target"] is not None and pd.notna(pos.at[idx, "target"]):
+                    pos.at[idx, "target"] = float(pos.at[idx, "target"]) - total_gap
+            return pos
 
     def pending_orders(self) -> pd.DataFrame:
         with db.connect(self.db_path) as conn:
@@ -249,15 +306,19 @@ class PaperBroker:
                         # 缺值時保留舊值（不讓 None 抹掉既有停損停利）。
                         new_stop = _keep_higher(row[2], o["stop_loss"])
                         new_tgt = _keep_higher(row[3], o["target"])
-                        conn.execute("UPDATE positions SET shares=?, avg_cost=?, stop_loss=?, target=? "
-                                     "WHERE stock_id=?",
-                                     (total_sh, avg, new_stop, new_tgt, o["stock_id"]))
+                        # ex_adj_date 推進到成交日：加碼帶進的新 stop/target 是決策當日尺度，
+                        # 成交日(含)以前的除息已內含於進場/加碼價，不可再被 _apply_ex 重扣。
+                        conn.execute("UPDATE positions SET shares=?, avg_cost=?, stop_loss=?, target=?, "
+                                     "ex_adj_date=? WHERE stock_id=?",
+                                     (total_sh, avg, new_stop, new_tgt, date, o["stock_id"]))
                     else:
+                        # ex_adj_date 設為建倉日：進場價已是成交日 raw 價（含當日除息跳空），
+                        # 該日(含)以前的除息事件不得再對 stop/target 重扣。
                         conn.execute(
                             "INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, "
-                            "industry, opened_at, plan_as_of) VALUES (?,?,?,?,?,?,?,?)",
+                            "industry, opened_at, plan_as_of, ex_adj_date) VALUES (?,?,?,?,?,?,?,?,?)",
                             (o["stock_id"], o["shares"], open_px, o["stop_loss"], o["target"],
-                             o["industry"], date, o["created_as_of"]))
+                             o["industry"], date, o["created_as_of"], date))
                     conn.execute("UPDATE orders SET status='filled', fill_date=?, fill_price=? WHERE id=?",
                                  (date, open_px, o["id"]))
                     conn.execute("INSERT INTO fills (date, stock_id, side, shares, price, fee, tax, reason) "
@@ -297,6 +358,40 @@ class PaperBroker:
         return {"stock_id": stock_id, "reason": reason, "price": price,
                 "shares": p["shares"], "pnl": round(pnl, 0)}
 
+    def _apply_ex_dividend_adjust(self, conn, date: str) -> None:
+        """除權息同步：對持倉的 stop_loss/target 扣掉截至 date(含) 未套用的名目跳空。
+
+        撮合/停損用 raw 日K，除息日 raw 價跳空下跌約當息值，但決策的 stop/target 建立
+        在決策當日價格尺度——不校正會把「配息名目跳空」誤判成觸損/觸標，砍出假虧損。
+        比照真實券商在除息日對條件單同步下修息值。
+
+        冪等：ex_adj_date 記已套用的最後除息日，只套用 date>ex_adj_date（起點為
+        opened_at∪ex_adj_date，取較晚者）的事件——同一除息日不會重複扣兩次。
+        須在 check_stops 讀持倉判觸價「之前」呼叫（同一 immediate 交易內）。
+        """
+        pos = db.read_sql(
+            conn, "SELECT stock_id, stop_loss, target, opened_at, ex_adj_date FROM positions")
+        for p in pos.to_dict(orient="records"):
+            # 起算點：建倉日與上次已調整日取較晚者（建倉當日的除息事件已內含於進場價，
+            # 不重扣；execute_pending 建倉時已把 ex_adj_date 設為建倉日）。
+            after = max(p.get("ex_adj_date") or "", p.get("opened_at") or "")
+            if not after:   # 兩者皆缺 → 無安全基準日，跳過（避免誤扣整段歷史除息）
+                continue
+            events = _ex_gap_events(conn, p["stock_id"], after, date)
+            if not events:
+                continue
+            total_gap = sum(g for _, g in events)
+            last_ex = events[-1][0]
+            new_stop = (float(p["stop_loss"]) - total_gap) if p["stop_loss"] is not None else None
+            new_tgt = (float(p["target"]) - total_gap) if p["target"] is not None else None
+            conn.execute(
+                "UPDATE positions SET stop_loss=?, target=?, ex_adj_date=? WHERE stock_id=?",
+                (new_stop, new_tgt, last_ex, p["stock_id"]))
+            log.info("除權息條件單調整 %s：除息日 %s 累計息值 %.2f → 停損 %s、停利 %s",
+                     p["stock_id"], last_ex, total_gap,
+                     f"{new_stop:.2f}" if new_stop is not None else "—",
+                     f"{new_tgt:.2f}" if new_tgt is not None else "—")
+
     def check_stops(self, date: str) -> list[dict]:
         """收盤風控：low ≤ 停損 → 以停損價出場；high ≥ 停利 → 以目標價出場（雙觸以停損計）。
 
@@ -304,9 +399,13 @@ class PaperBroker:
         停損（open < stop）以開盤價成交（停損價當日根本不存在，否則虧損被低估、
         甚至記出當日最高價之上的假成交）；跳空突破停利（open > target）以開盤價
         成交（實際賣得更好）。
+
+        觸價判定前先做除權息同步（見 _apply_ex_dividend_adjust）：抱過除息日的持倉，
+        raw 價的名目跳空已同步扣進 stop/target，避免配息被誤判成觸損砍出假虧損。
         """
         results = []
         with db.connect(self.db_path, immediate=True) as conn:  # 序列化現金讀改寫
+            self._apply_ex_dividend_adjust(conn, date)   # 先同步除權息，再判觸價
             pos = db.read_sql(conn, "SELECT * FROM positions")
             cash = float(self._get_state(conn, "cash", "0"))
             for p in pos.to_dict(orient="records"):
