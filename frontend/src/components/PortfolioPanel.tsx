@@ -129,6 +129,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
           {(data?.pending_orders?.length ?? 0) > 0 && (
             <span style={{ fontSize: 11, color: "var(--warning)", alignSelf: "center" }}>
               ⏳ 待撮合委託 {data?.pending_orders?.length} 筆
+              {data?.next_trading_day && `（${data.next_trading_day} 開盤撮合）`}
             </span>
           )}
         </div>
@@ -157,7 +158,7 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
 
         {tab === "orders" && (
           <table className="grid" style={{ whiteSpace: "nowrap" }}>
-            <thead><tr><th>#</th><th>決策日</th><th>代碼</th><th>名稱</th><th>方向</th><th>限價</th><th>股數</th><th>停損/停利</th><th>狀態</th><th>成交</th></tr></thead>
+            <thead><tr><th>#</th><th>決策日</th><th>代碼</th><th>名稱</th><th>方向</th><th>限價</th><th>股數</th><th>停損/停利</th><th>狀態</th><th>成交/預計撮合</th></tr></thead>
             <tbody>
               {(data?.orders ?? []).map((o: any) => {
                 const st: Record<string, [string, string]> = {
@@ -179,7 +180,8 @@ export function PortfolioPanel({ onSelect }: { onSelect: (id: string) => void })
                     <td className="mono" style={{ fontSize: 10 }}>{fmt(o.stop_loss)} / {fmt(o.target)}</td>
                     <td style={{ color, fontSize: 11 }}>{label}</td>
                     <td className="mono" style={{ fontSize: 11 }}>
-                      {o.status === "filled" ? `${o.fill_date ?? ""} @${fmt(o.fill_price)}` : "—"}
+                      {o.status === "filled" ? `${o.fill_date ?? ""} @${fmt(o.fill_price)}`
+                        : o.status === "pending" && o.expected_fill_date ? `→ ${o.expected_fill_date}` : "—"}
                     </td>
                   </tr>
                 );

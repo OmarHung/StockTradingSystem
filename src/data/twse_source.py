@@ -295,7 +295,6 @@ def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
     一檔涵蓋該市場全部公司該月營收（千元，入庫 ×1000 對齊 FinMind 元制）。
     date 欄沿用 FinMind 慣例＝營收月次月 1 日（公告期為次月 10 日前）。
     """
-    import datetime as _dt
     from io import StringIO
 
     global _last_call
@@ -351,11 +350,11 @@ def fetch_mops_revenue(conn, year: int, month: int, market: str) -> int:
             })
     if not rows:
         return 0
-    n = db.upsert_dataframe(conn, "month_revenue", pd.DataFrame(rows))
-    now = _dt.datetime.now().isoformat(timespec="seconds")
-    db.merge_range(conn, f"mops_{market}", f"{year:04d}-{month:02d}",
-                   date_str, date_str, now)
-    return n
+    # 只寫資料、不標記 fetch_log：MOPS 檔在公告期（次月 1~10 日）內逐日長大，
+    # 這裡可能只抓到提前公告的部分公司。「該月是否補齊」的標記責任完全交給
+    # 唯一呼叫端 _official_revenue_backfill 的 fully_announced 閘門判斷——內層
+    # 若無條件標記，會架空該閘門讓遲公告公司的營收永久缺失（除非 --force）。
+    return db.upsert_dataframe(conn, "month_revenue", pd.DataFrame(rows))
 
 
 # ---------- TPEx 除權息（bulletin/exDailyQ，日期區間、資料回溯 2008）----------

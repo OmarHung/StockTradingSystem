@@ -283,7 +283,8 @@ SCHEMA: dict[str, str] = {
             industry    TEXT,
             status      TEXT NOT NULL,     -- pending / filled / expired / cancelled
             fill_date   TEXT,
-            fill_price  REAL
+            fill_price  REAL,
+            expected_fill_date TEXT        -- 掛單時算出的次交易日（跳過週末/假日）
         )
     """,
     "fills": """
@@ -307,6 +308,15 @@ SCHEMA: dict[str, str] = {
             positions_value REAL,
             equity          REAL,
             taiex_close     REAL
+        )
+    """,
+    # 台股休市日（TWSE 官方年度假日表，market_calendar 同步；週末不入表）。
+    # 年度覆蓋標記記在 fetch_log（dataset='twse_holiday', stock_id=西元年）。
+    "market_holiday": """
+        CREATE TABLE IF NOT EXISTS market_holiday (
+            date       TEXT PRIMARY KEY,   -- 休市日 YYYY-MM-DD
+            name       TEXT,               -- 名稱（春節、和平紀念日…）
+            fetched_at TEXT
         )
     """,
     # 回補進度紀錄：記錄每檔每類資料「已補範圍」(first_date~last_date)，
@@ -350,6 +360,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(stock_info)").fetchall()]
     if cols and "delisted" not in cols:
         conn.execute("ALTER TABLE stock_info ADD COLUMN delisted INTEGER DEFAULT 0")
+    # 委託單預計撮合日（依交易日曆跳過週末/假日）
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(orders)").fetchall()]
+    if cols and "expected_fill_date" not in cols:
+        conn.execute("ALTER TABLE orders ADD COLUMN expected_fill_date TEXT")
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:

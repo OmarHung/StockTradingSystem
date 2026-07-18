@@ -21,7 +21,11 @@ def broker(tmp_path, monkeypatch):
             return {"capital": {"total": 1_000_000}}[k]
 
     import src.broker.paper as paper_mod
+    import src.data.market_calendar as mcal_mod
     monkeypatch.setattr(paper_mod, "get_settings", lambda: FakeSettings())
+    # 交易日曆也指向 temp DB，並停用 lazy 網路同步（測試不打 TWSE API）
+    monkeypatch.setattr(mcal_mod, "get_settings", lambda: FakeSettings())
+    monkeypatch.setattr(mcal_mod, "_maybe_sync", lambda conn, year: None)
     return paper_mod.PaperBroker()
 
 
@@ -146,3 +150,99 @@ def test_place_buy_rejected_when_trading_disabled(broker):
     broker.set_trading_enabled(True)
     oid = broker.place_buy("2026-07-06", "2330", 1000, 100.0, 95.0, 110.0)
     assert isinstance(oid, int)
+
+
+def test_expected_fill_date_skips_weekend_and_holiday(broker):
+    """掛單記預計撮合日：跳過週末與假日表休市日。"""
+    with db.connect(broker.db_path) as conn:
+        # 2024-01-05 是週五；設 01-08（週一）為假日 → 預計撮合 01-09（週二）
+        conn.execute("INSERT INTO market_holiday (date, name) VALUES ('2024-01-08', '測試假日')")
+    broker.place_buy("2024-01-05", "9999", 1000, limit_price=100.0,
+                     stop_loss=95.0, target=110.0)
+    o = broker.pending_orders().iloc[0]
+    assert o["expected_fill_date"] == "2024-01-09"
+
+
+def test_execute_pending_skipped_on_holiday(broker):
+    """休市日撮合：不動任何單（否則「當日無資料→失效」會誤殺全部委託）。"""
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=95.0, target=115.0)
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO market_holiday (date, name) VALUES ('2024-01-02', '測試假日')")
+    with patch("src.broker.paper.q.get_price", return_value=_px(101, 103, 100, 102)):
+        res = broker.execute_pending("2024-01-02")   # 假日
+        assert res == []
+        res = broker.execute_pending("2024-01-06")   # 週六
+        assert res == []
+    assert broker.pending_orders().shape[0] == 1     # 委託保留
+    # 下一個交易日照常撮合
+    with patch("src.broker.paper.q.get_price", return_value=_px(101, 103, 100, 102)):
+        res = broker.execute_pending("2024-01-03")
+    assert res[0]["status"] == "filled"
+
+
+def test_execute_pending_skipped_when_no_taiex_data(broker):
+    """TAIEX 當日無日K（颱風臨時休市/價格未回補）→ 撮合跳過、委託保留。"""
+    import pandas as pd
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=95.0, target=115.0)
+
+    def _no_taiex(stock_id, *a, **kw):
+        return pd.DataFrame() if stock_id == "TAIEX" else _px(101, 103, 100, 102)
+
+    with patch("src.broker.paper.q.get_price", side_effect=_no_taiex):
+        res = broker.execute_pending("2024-01-02")
+    assert res == []
+    assert broker.pending_orders().shape[0] == 1
+
+
+def test_recent_stops_includes_intraday(broker):
+    """冷卻閘要涵蓋盤中停損（stop_intraday）：盤中監控是主要停損路徑，
+    只認 'stop' 會讓絕大多數停損漏進冷卻。"""
+    with db.connect(broker.db_path) as conn:
+        conn.execute("INSERT INTO positions (stock_id, shares, avg_cost, stop_loss, target, opened_at) "
+                     "VALUES ('2330', 1000, 100.0, 95.0, 120.0, '2024-01-01')")
+    broker.intraday_exit("2024-01-05", "2330", 95.0, "stop_intraday")
+    assert broker.recent_stops(days=2000).get("2330") == "2024-01-05"
+    # as_of 為基準：停損日之後才算冷卻中，之前不算（歷史重放不看未來停損）
+    assert broker.recent_stops(days=2000, as_of="2024-01-04") == {}
+    assert broker.recent_stops(days=2000, as_of="2024-01-05").get("2330") == "2024-01-05"
+
+
+def test_kill_switch_cancels_pending_on_execute(broker):
+    """緊急停止後，昨日委託在開盤撮合時被撤銷、不成交建倉（kill-switch 補防）。"""
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=95.0, target=115.0)
+    broker.set_trading_enabled(False)
+    with patch("src.broker.paper.q.get_price", return_value=_px(100, 101, 99, 100)):
+        res = broker.execute_pending("2024-01-02")   # 開盤 100 ≤ 限價，正常會成交
+    assert res and res[0]["status"] == "cancelled_kill_switch"
+    assert broker.positions().empty                  # 沒建倉
+    assert broker.pending_orders().empty             # 委託已撤
+    assert broker.cash == 1_000_000                  # 現金未動
+
+
+def test_stop_gap_down_fills_at_open(broker):
+    """開盤跳空跌破停損：以開盤價成交（停損價當日不存在，否則虧損被低估）。"""
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=95.0, target=130.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(100, 101, 99, 100)):
+        broker.execute_pending("2024-01-02")          # 進場 @100
+    # 隔日開盤 90（已低於停損 95），全日 88~91 → 停損價 95 是當日不存在的價位
+    with patch("src.broker.paper.q.get_price", return_value=_px(90, 91, 88, 89)):
+        exits = broker.check_stops("2024-01-03")
+    assert exits[0]["reason"] == "stop"
+    assert exits[0]["price"] == 90                    # 開盤價，非停損價 95
+
+
+def test_target_gap_up_fills_at_open(broker):
+    """開盤跳空突破停利：以開盤價成交（實際賣得比目標價更好）。"""
+    broker.place_buy("2024-01-01", "9999", 1000, limit_price=102.0,
+                     stop_loss=90.0, target=110.0)
+    with patch("src.broker.paper.q.get_price", return_value=_px(100, 101, 99, 100)):
+        broker.execute_pending("2024-01-02")
+    # 隔日開盤 120（已高於停利 110）
+    with patch("src.broker.paper.q.get_price", return_value=_px(120, 122, 118, 121)):
+        exits = broker.check_stops("2024-01-03")
+    assert exits[0]["reason"] == "target"
+    assert exits[0]["price"] == 120                   # 開盤價，非目標價 110

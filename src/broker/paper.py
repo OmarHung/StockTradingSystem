@@ -16,6 +16,7 @@ import pandas as pd
 
 from src.config import get_settings
 from src.data import database as db
+from src.data import market_calendar as mcal
 from src.data import query as q
 from src.env.costs import CostModel
 from src.logging_setup import get_logger
@@ -82,12 +83,25 @@ class PaperBroker:
         with db.connect(self.db_path) as conn:
             return db.read_sql(conn, "SELECT * FROM equity_history ORDER BY date")
 
-    def recent_stops(self, days: int = 30) -> dict[str, str]:
-        cutoff = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    def recent_stops(self, days: int = 30, as_of: str | None = None) -> dict[str, str]:
+        """近期停損紀錄（餵 Guard 冷卻閘）。
+
+        reason LIKE 'stop%' 同時涵蓋收盤 'stop' 與盤中 'stop_intraday'——盤中監控
+        是排程預設啟用的主要停損路徑，只認 'stop' 會讓絕大多數停損漏進冷卻，剛停損
+        的股票隔天就能被買回，違反 cooldown_days。cutoff 以 as_of（非 today）為基準，
+        歷史重放時冷卻判斷才正確。
+        """
+        base = dt.date.fromisoformat(as_of) if as_of else dt.date.today()
+        cutoff = (base - dt.timedelta(days=days)).isoformat()
+        sql = ("SELECT stock_id, MAX(date) AS d FROM fills "
+               "WHERE reason LIKE 'stop%' AND date>=?")
+        params: list = [cutoff]
+        if as_of:  # 重放不看未來的停損
+            sql += " AND date<=?"
+            params.append(as_of)
+        sql += " GROUP BY stock_id"
         with db.connect(self.db_path) as conn:
-            rows = db.read_sql(
-                conn, "SELECT stock_id, MAX(date) AS d FROM fills "
-                      "WHERE reason='stop' AND date>=? GROUP BY stock_id", (cutoff,))
+            rows = db.read_sql(conn, sql, tuple(params))
         return dict(zip(rows["stock_id"], rows["d"])) if not rows.empty else {}
 
     def portfolio_state(self, as_of: str | None = None) -> PortfolioState:
@@ -107,7 +121,7 @@ class PaperBroker:
             total_capital=float(cfg["capital"]["total"]),
             cash=self.cash,
             positions=positions,
-            recent_stops=self.recent_stops(),
+            recent_stops=self.recent_stops(as_of=as_of),
             peak_equity=peak,
         )
 
@@ -118,11 +132,16 @@ class PaperBroker:
         再查一次，避免每日流程開跑後才按停止、進行中的決策照樣下單的競態。"""
         if not self.trading_enabled():
             return None
+        # 預計撮合日＝掛單日之後的次「交易日」（跳過週末/假日）——明天休市時
+        # 委託不會憑空消失，會保留到下一個開盤日撮合，這裡先算給人看
+        expected = mcal.next_trading_day(as_of)
         with db.connect(self.db_path) as conn:
             cur = conn.execute(
                 "INSERT INTO orders (created_as_of, stock_id, side, limit_price, shares, "
-                "stop_loss, target, industry, status) VALUES (?,?,?,?,?,?,?,?, 'pending')",
-                (as_of, stock_id, "BUY", limit_price, shares, stop_loss, target, industry))
+                "stop_loss, target, industry, status, expected_fill_date) "
+                "VALUES (?,?,?,?,?,?,?,?, 'pending', ?)",
+                (as_of, stock_id, "BUY", limit_price, shares, stop_loss, target,
+                 industry, expected))
             return int(cur.lastrowid)
 
     def cancel_all_pending(self) -> int:
@@ -140,7 +159,32 @@ class PaperBroker:
 
         只撈 created_as_of < date 的單：同日重複執行流程時，當天新掛的單留待
         次交易日撮合（冪等，避免拿掛單當天的行情誤殺）。
+
+        休市防護（雙層）：date 非交易日、或 TAIEX 當日無日K（颱風臨時休市、
+        價格尚未回補）→ 不動任何單直接返回。否則個股「無資料＝停牌失效」的
+        規則會在市場根本沒開的日子把所有 pending 單誤殺。
+
+        緊急停止防護：交易停用時，昨日掛的限價買單代表「未實現的新曝險」，
+        撮合成交等於違反 kill-switch「不開新倉」語義——這裡直接撤銷所有待撮合
+        委託（place_buy 只擋新單，擋不到已在隊列裡的舊單，此為那個洞的補防）。
         """
+        if not mcal.is_trading_day(date):
+            log.info("%s 非交易日（週末/假日），撮合跳過、委託保留", date)
+            return []
+        if not self.trading_enabled():
+            with db.connect(self.db_path) as conn:
+                pend = db.read_sql(
+                    conn, "SELECT stock_id FROM orders WHERE status='pending'")
+                conn.execute("UPDATE orders SET status='cancelled' WHERE status='pending'")
+            out = [{"stock_id": s, "status": "cancelled_kill_switch"}
+                   for s in pend["stock_id"].tolist()]
+            if out:
+                log.warning("⛔ 交易已停止：撤銷 %d 筆待撮合委託（kill-switch，不開新倉）",
+                            len(out))
+            return out
+        if q.get_price("TAIEX", start=date, end=date).empty:
+            log.warning("%s 無 TAIEX 日K（臨時休市或價格未回補）——撮合跳過、委託保留", date)
+            return []
         results = []
         with db.connect(self.db_path) as conn:
             orders = db.read_sql(
@@ -221,7 +265,13 @@ class PaperBroker:
                 "shares": p["shares"], "pnl": round(pnl, 0)}
 
     def check_stops(self, date: str) -> list[dict]:
-        """收盤風控：low ≤ 停損 → 以停損價出場；high ≥ 停利 → 以目標價出場（雙觸以停損計）。"""
+        """收盤風控：low ≤ 停損 → 以停損價出場；high ≥ 停利 → 以目標價出場（雙觸以停損計）。
+
+        跳空穿越夾價：出場價夾回當日實際 [open, high/low] 區間——開盤就跳空跌破
+        停損（open < stop）以開盤價成交（停損價當日根本不存在，否則虧損被低估、
+        甚至記出當日最高價之上的假成交）；跳空突破停利（open > target）以開盤價
+        成交（實際賣得更好）。
+        """
         results = []
         with db.connect(self.db_path) as conn:
             pos = db.read_sql(conn, "SELECT * FROM positions")
@@ -230,12 +280,13 @@ class PaperBroker:
                 px = q.get_price(p["stock_id"], start=date, end=date)
                 if px.empty:
                     continue
-                low, high = float(px["low"].iloc[0]), float(px["high"].iloc[0])
+                open_, low, high = (float(px["open"].iloc[0]), float(px["low"].iloc[0]),
+                                    float(px["high"].iloc[0]))
                 exit_price, reason = None, None
                 if p["stop_loss"] and low <= float(p["stop_loss"]):
-                    exit_price, reason = float(p["stop_loss"]), "stop"
+                    exit_price, reason = min(float(p["stop_loss"]), open_), "stop"
                 elif p["target"] and high >= float(p["target"]):
-                    exit_price, reason = float(p["target"]), "target"
+                    exit_price, reason = max(float(p["target"]), open_), "target"
                 if exit_price is None:
                     continue
                 amount = p["shares"] * exit_price

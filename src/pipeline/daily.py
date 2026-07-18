@@ -31,6 +31,8 @@ def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
         log.exception("每日流程失敗")
         telegram.send_error_alert("每日流程失敗", f"{type(e).__name__}: {e}")
         raise
+    if summary.get("skipped"):
+        return summary   # 休市日跳過：不發每日報告
     # 流程收尾：Telegram 每日報告（未設定則跳過；失敗只記 log，不影響交易）
     telegram.send_daily_report(summary)
     return summary
@@ -39,6 +41,16 @@ def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
 def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
                reflect_weekly: bool = True) -> dict:
     as_of = as_of or dt.date.today().isoformat()
+
+    # 交易日閘門：休市日（週末/國定假日）整個流程免跑——撮合/停損/快照/決策
+    # 都以「當日行情存在」為前提，休市日跑了輕則空轉、重則誤殺 pending 委託
+    from src.data import market_calendar as mcal
+    if not mcal.is_trading_day(as_of):
+        log.info("%s 非交易日（週末/假日），每日流程跳過；下一交易日 %s",
+                 as_of, mcal.next_trading_day(as_of))
+        return {"as_of": as_of, "skipped": "non_trading_day",
+                "next_trading_day": mcal.next_trading_day(as_of)}
+
     broker = PaperBroker()
     summary: dict = {"as_of": as_of}
 

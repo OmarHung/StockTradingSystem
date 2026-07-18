@@ -55,14 +55,19 @@ def get_price(
                 df = pd.concat([df, pd.DataFrame([live])], ignore_index=True)
         if not adjusted or df.empty:
             return df
-        # 調整事件 = 除權息 ∪ 公司行動（分割/減資，跳空偵測器產生）
+        # 調整事件 = 除權息 ∪ 公司行動（分割/減資，跳空偵測器產生）。
+        # capital_change 排除與 dividend 同日者：除息跳空曾被偵測器誤判成減資寫入
+        # capital_change，兩表同日並存會讓還原係數疊乘、歷史價被雙重調整。dividend
+        # 是同日事件的權威來源，capital_change 只補「非除權息」的公司行動。
         div = db.read_sql(
             conn,
             "SELECT date, before_price, after_price FROM dividend "
             "WHERE stock_id=? AND before_price>0 AND after_price>0 "
             "UNION ALL "
-            "SELECT date, before_price, after_price FROM capital_change "
-            "WHERE stock_id=? AND before_price>0 AND after_price>0 "
+            "SELECT c.date, c.before_price, c.after_price FROM capital_change c "
+            "WHERE c.stock_id=? AND c.before_price>0 AND c.after_price>0 "
+            "AND NOT EXISTS (SELECT 1 FROM dividend d "
+            "                WHERE d.stock_id=c.stock_id AND d.date=c.date) "
             "ORDER BY date",
             (stock_id, stock_id),
         )
@@ -363,8 +368,10 @@ def get_prices_bulk(
             f"SELECT stock_id, date, before_price, after_price FROM dividend "
             f"WHERE stock_id IN ({placeholders}) AND before_price>0 AND after_price>0 "
             f"UNION ALL "
-            f"SELECT stock_id, date, before_price, after_price FROM capital_change "
-            f"WHERE stock_id IN ({placeholders}) AND before_price>0 AND after_price>0 "
+            f"SELECT c.stock_id, c.date, c.before_price, c.after_price FROM capital_change c "
+            f"WHERE c.stock_id IN ({placeholders}) AND c.before_price>0 AND c.after_price>0 "
+            f"AND NOT EXISTS (SELECT 1 FROM dividend d "
+            f"                WHERE d.stock_id=c.stock_id AND d.date=c.date) "
             f"ORDER BY stock_id, date",
             tuple(stock_ids) * 2,
         )
@@ -390,13 +397,20 @@ def get_institutional_bulk(stock_ids: list[str], start: str, end: str) -> pd.Dat
 
 
 def get_revenue_bulk(stock_ids: list[str], as_of: str) -> pd.DataFrame:
-    """取多檔在 as_of（含）之前已公告的月營收（避免前視偏差）。"""
+    """取多檔在 as_of（含）之前「確實已公告」的月營收（避免前視偏差）。
+
+    date 欄＝營收月的次月 1 日（FinMind 慣例），但官方公告截止日是次月 10 日——
+    只用 date<=as_of 過濾，會讓 as_of 落在次月 1~9 日時看到尚未公開的營收，且回測
+    月初調倉日正好落在這區間、前視最大。故改以公告截止日（date + 9 天＝次月 10 日）
+    為可見門檻：as_of 未達該月 10 日就不納入該筆營收。
+    """
     if not stock_ids:
         return pd.DataFrame()
     placeholders = ",".join("?" * len(stock_ids))
     sql = (
         f"SELECT * FROM month_revenue WHERE stock_id IN ({placeholders}) "
-        f"AND date<=? ORDER BY stock_id, revenue_year, revenue_month"
+        f"AND date IS NOT NULL AND date(date, '+9 days') <= ? "
+        f"ORDER BY stock_id, revenue_year, revenue_month"
     )
     with db.connect(_db_path()) as conn:
         return db.read_sql(conn, sql, tuple(stock_ids) + (as_of,))

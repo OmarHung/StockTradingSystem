@@ -21,6 +21,7 @@ import time
 
 from src.broker.paper import PaperBroker
 from src.config import get_settings
+from src.data import market_calendar as mcal
 from src.data import shioaji_source
 from src.logging_setup import get_logger, setup_logging
 
@@ -34,8 +35,8 @@ STALE_LIMIT = 3
 
 def run(once: bool = False) -> None:
     today = dt.date.today()
-    if today.weekday() >= 5:
-        log.info("週末休市，盤中監控結束")
+    if not mcal.is_trading_day(today.isoformat()):
+        log.info("休市日（週末/假日），盤中監控結束")
         return
     if dt.datetime.now().time() >= MARKET_CLOSE and not once:
         log.info("已過收盤時間，盤中監控結束（收盤風控由每日主流程處理）")
@@ -79,11 +80,17 @@ def run(once: bool = False) -> None:
             if not s or s.get("ts_date") != today_iso:
                 continue
             exit_price, reason = None, None
-            # 與收盤 check_stops 同一優先序：停損優先於停利
+            cur = float(s.get("close") or 0)   # 快照現價（最後成交）
+            # 與收盤 check_stops 同一優先序：停損優先於停利。
+            # 跳空夾價：出場不會成交在比現價更好的位置——現價已跌破停損就以現價計
+            # （否則帳上以停損價出場＝虛構一個當下買不到的更高賣價，損益被低估）；
+            # 停利同理，現價已高於停利時以現價成交（實際賣得更好）。
             if p["stop_loss"] and s["low"] > 0 and s["low"] <= float(p["stop_loss"]):
-                exit_price, reason = float(p["stop_loss"]), "stop_intraday"
+                stop = float(p["stop_loss"])
+                exit_price, reason = (min(stop, cur) if cur > 0 else stop), "stop_intraday"
             elif p["target"] and s["high"] > 0 and s["high"] >= float(p["target"]):
-                exit_price, reason = float(p["target"]), "target_intraday"
+                tgt = float(p["target"])
+                exit_price, reason = (max(tgt, cur) if cur > 0 else tgt), "target_intraday"
             if exit_price is None:
                 continue
             r = broker.intraday_exit(today_iso, p["stock_id"], exit_price, reason)

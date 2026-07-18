@@ -775,6 +775,9 @@ def portfolio():
                      "last": last, "market_value": round(mv, 0),
                      "unrealized_pnl": round(mv - cost, 0),
                      "unrealized_pct": round((last / r["avg_cost"] - 1) * 100, 2) if r["avg_cost"] else 0})
+    import datetime as _dt
+    from src.data import market_calendar as mcal
+    today = _dt.date.today().isoformat()
     return {
         "cash": broker.cash,
         "trading_enabled": broker.trading_enabled(),
@@ -783,6 +786,9 @@ def portfolio():
         "orders": _with_name(_records(broker.orders(100))),
         "fills": _with_name(_records(broker.fills(100))),
         "performance": performance_summary(),
+        # 交易日資訊：待撮合委託的預計撮合日提示（假日/週末順延）
+        "is_trading_day": mcal.is_trading_day(today, allow_fetch=False),
+        "next_trading_day": mcal.next_trading_day(today, allow_fetch=False),
     }
 
 
@@ -798,16 +804,39 @@ def portfolio_reset():
     return {"status": "reset", "cash": float(get_settings()["capital"]["total"])}
 
 
+@app.get("/api/calendar/status")
+def calendar_status():
+    """交易日曆狀態：今天是否開盤、下一交易日、假日表覆蓋年度、近期休市日。"""
+    from src.data import market_calendar as mcal
+    return mcal.status()
+
+
+@app.post("/api/calendar/sync")
+def calendar_sync():
+    """手動同步 TWSE 年度假日表（nightly 回補也會自動同步）。"""
+    from src.data import market_calendar as mcal
+    try:
+        return {"synced": mcal.sync_holidays()}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"假日表同步失敗：{e}")
+
+
 class TradingToggle(BaseModel):
     enabled: bool
 
 
 @app.post("/api/trading/toggle")
 def trading_toggle(req: TradingToggle):
-    """緊急停止/恢復：停用時每日流程只做保護性出場，不開新倉。"""
+    """緊急停止/恢復：停用時每日流程只做保護性出場，不開新倉。
+
+    停用時立即撤銷所有待撮合委託——否則昨日掛的限價買單隔天開盤照樣成交建倉，
+    kill-switch 的「不開新倉」語義會被打破（execute_pending 另有同樣的防呆撤單）。
+    """
     from src.broker.paper import PaperBroker
-    PaperBroker().set_trading_enabled(req.enabled)
-    return {"trading_enabled": req.enabled}
+    broker = PaperBroker()
+    broker.set_trading_enabled(req.enabled)
+    cancelled = broker.cancel_all_pending() if not req.enabled else 0
+    return {"trading_enabled": req.enabled, "cancelled_orders": cancelled}
 
 
 class DailyRunReq(BaseModel):

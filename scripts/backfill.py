@@ -119,18 +119,33 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
 
     with db.connect(cfg.db_path) as conn:
         # 股票清單也走 FinMind——起手就 402 時不 crash，靠既有清單續跑
+        # 各前置步驟之間逐一 commit：每步都夾著網路請求（FinMind/官方站/shioaji
+        # 登入），未落地就進下一個網路呼叫會讓寫鎖橫跨數十秒 → API 行程撞
+        # database is locked。原則：網路 I/O 前先把前一步的寫入提交。
         try:
             fetchers.fetch_stock_info(client, conn)
         except FinMindQuotaExhausted:
             log.warning("FinMind 額度用罄（402），無法刷新股票清單，改用資料庫既有清單")
             finmind_dead = True
+        conn.commit()
+        # 假日表（TWSE 官方年度休市日，一次呼叫）：委託撮合/排程判斷交易日用。
+        # 每晚刷新一次順便涵蓋年度換檔與官方臨時公告。
+        try:
+            from src.data import market_calendar
+            market_calendar.sync_holidays(conn)
+        except Exception as e:  # noqa: BLE001
+            log.warning("假日表同步失敗（不影響回補）：%s", str(e)[:100])
+        conn.commit()
         fetchers.fetch_disposition(conn)  # 官方處置股名單（TWSE/TPEx，不受 FinMind 額度影響）
+        conn.commit()
         if shioaji_source.available():    # 處置股第二源（雙源並用）
             try:
                 shioaji_source.fetch_disposition(conn)
             except Exception as e:  # noqa: BLE001
                 log.warning("shioaji 處置股抓取失敗（不影響回補）：%s", e)
+            conn.commit()
         fetchers.mark_delisted(conn)      # 下市標記（券商合約為準，過濾殭屍代號）
+        conn.commit()
         targets = stocks if stocks else fetchers.select_universe(conn, cfg)
         if limit:
             targets = targets[:limit]
@@ -161,13 +176,6 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
             else:
                 log.error("股價日K 需要 shioaji（.env 設 SJ_API_KEY / SJ_SEC_KEY）——"
                           "FinMind 已不再作為 K 線來源，本輪跳過股價回補")
-        if "price_daily" in requested or "dividend" in active:
-            # 公司行動偵測（分割/減資跳空 → 還原價事件），股價/除權息更新後執行
-            from src.data import corporate_actions
-            n_ca = corporate_actions.detect(conn)
-            if n_ca:
-                log.info("公司行動偵測：新增 %d 個價格調整事件（分割/減資）", n_ca)
-
         # 籌碼主源：TWSE/TPEx 官方（按交易日全市場，免額度）；除權息主源：TWT49U
         # 官方覆蓋完成的市場，FinMind 對應 dataset 自動跳過（降級為備援）
         official_skip: dict[str, set[str]] = {}   # dataset -> 要跳過的市場集合
@@ -183,7 +191,7 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
         if "valuation" in requested:
             _official_valuation_backfill(conn, default_start, end, force=force)
         if "dividend" in active:
-            div_counts = _official_dividend_backfill(conn, default_start, end)
+            div_counts = _official_dividend_backfill(conn, default_start, end, force=force)
             for mkt, n in div_counts.items():
                 if n >= 0:   # 官方源成功（含 0 筆＝該期間確實無除權息）→ FinMind 跳過
                     official_skip.setdefault("dividend", set()).add(mkt)
@@ -237,6 +245,16 @@ def backfill(stocks: list[str] | None, start: str | None, end: str | None,
                     "pass": pass_label, "current": i + 1, "total": total,
                     "stock_id": sid, "rows": rows_this,
                 })
+
+        # 公司行動偵測（分割/減資跳空 → 還原價事件）：務必在所有除權息資料
+        # （官方 TWT49U/exDailyQ ＋ FinMind 備援）都入庫後才跑，否則除息跳空
+        # 會被誤判成減資寫入 capital_change，與稍後補進的 dividend 同日事件疊乘、
+        # 造成還原價雙重調整（見 query._apply_adjustment 的同日去重防護）。
+        if "price_daily" in requested or "dividend" in active:
+            from src.data import corporate_actions
+            n_ca = corporate_actions.detect(conn)
+            if n_ca:
+                log.info("公司行動偵測：新增 %d 個價格調整事件（分割/減資）", n_ca)
 
     log.info("回補完成，各 dataset 寫入列數：%s", totals)
     _emit_progress({"pass": "完成", "current": total, "total": total, "stock_id": "", "rows": 0})
@@ -426,13 +444,33 @@ def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) 
         return {"twse": False, "tpex": False}
 
     mkt_map = {"twse": "sii", "tpex": "otc"}
+    today = dt.date.today()
+
+    # 自愈：清掉「公告期內就被標記完成」的舊月份標記（歷史 bug：fetch_mops_revenue
+    # 內層曾無條件標記，遲公告公司營收因此被永久跳過）。以標記當下該月是否已達
+    # fully_announced 門檻回推，未達者刪除讓本輪重補；已足月的正確標記保留。
+    for mops in ("sii", "otc"):
+        for key, upd in conn.execute(
+                "SELECT stock_id, updated_at FROM fetch_log WHERE dataset=?",
+                (f"mops_{mops}",)).fetchall():
+            try:
+                ky, km = int(key[:4]), int(key[5:7])
+                t = dt.date.fromisoformat((upd or "")[:10])
+            except (ValueError, TypeError, IndexError):
+                continue
+            old_at_mark = (t.year - ky) * 12 + (t.month - km)
+            premature = old_at_mark < 1 or (old_at_mark == 1 and t.day <= 15)
+            if premature:
+                conn.execute("DELETE FROM fetch_log WHERE dataset=? AND stock_id=?",
+                             (f"mops_{mops}", key))
+
     done: dict[str, set] = {}
     for mkt, mops in mkt_map.items():
         done[mkt] = set() if force else {
             r[0] for r in conn.execute(
                 "SELECT stock_id FROM fetch_log WHERE dataset=?", (f"mops_{mops}",)).fetchall()}
 
-    today = dt.date.today()
+
     now = dt.datetime.now().isoformat(timespec="seconds")
     total = len(months)
     for i, (y, m) in enumerate(months):
@@ -467,31 +505,69 @@ def _official_revenue_backfill(conn, start: str, end: str, force: bool = False) 
     return {mkt: (all_keys - {latest_key}) <= done[mkt] for mkt in mkt_map}
 
 
-def _official_dividend_backfill(conn, start: str, end: str) -> dict:
-    """官方除權息（上市 TWT49U + 上櫃 exDailyQ，皆為日期區間全市場，按季分段）。
+def _quarter_segments(start: str, end: str) -> list[tuple[dt.date, dt.date]]:
+    """把 [start, end] 切成逐季 (季初, 季末) 清單（新到舊，最新季優先）。"""
+    s = dt.date.fromisoformat(start)
+    segs = []
+    cur = dt.date(dt.date.fromisoformat(end).year,
+                  ((dt.date.fromisoformat(end).month - 1) // 3) * 3 + 1, 1)
+    floor = dt.date(s.year, ((s.month - 1) // 3) * 3 + 1, 1)
+    while cur >= floor:
+        q_end_month = ((cur.month - 1) // 3 + 1) * 3
+        q_end = (dt.date(cur.year, 12, 31) if q_end_month == 12
+                 else dt.date(cur.year, q_end_month + 1, 1) - dt.timedelta(days=1))
+        segs.append((cur, q_end))
+        prev = cur - dt.timedelta(days=1)
+        cur = dt.date(prev.year, ((prev.month - 1) // 3) * 3 + 1, 1)
+    return segs
+
+
+def _official_dividend_backfill(conn, start: str, end: str, force: bool = False) -> dict:
+    """官方除權息（上市 TWT49U + 上櫃 exDailyQ，皆為日期區間全市場，逐季分段）。
 
     回傳 {"twse": 筆數, "tpex": 筆數}；成功的市場 FinMind 直接跳過。
     單市場失敗不中斷另一市場（各自 try，失敗市場筆數 -1 表示不可標記跳過）。
+
+    逐季 fetch_log 標記（dataset=div_{mkt}, stock_id='YYYY-Qn'）：已結束的季抓過
+    即標記、之後跳過，只有含今天的當季每次重抓——除權息計算結果是歷史真值、過去
+    的季不會再變，避免每晚從 backfill_start 全期重抓（原本每晚重演數分鐘長寫鎖）。
+    每段抓完立即 commit：後續段落的網路請求（節流 3~6 秒、數十次）不持有 SQLite
+    寫鎖，否則長交易會讓 API 行程的帳本/UI 寫入撞 database is locked。
     """
+    today = dt.date.today()
     counts = {"twse": 0, "tpex": 0}
     fns = {"twse": twse_source.fetch_dividends_range,
            "tpex": twse_source.fetch_tpex_dividends_range}
+    lo, hi = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     for mkt, fn in fns.items():
-        s = dt.date.fromisoformat(start)
-        e = dt.date.fromisoformat(end)
+        dataset = f"div_{mkt}"
+        done = set() if force else {
+            r[0] for r in conn.execute(
+                "SELECT stock_id FROM fetch_log WHERE dataset=?", (dataset,)).fetchall()}
+        now = dt.datetime.now().isoformat(timespec="seconds")
         try:
-            while s <= e:
-                seg_end = min(s + dt.timedelta(days=92), e)
-                counts[mkt] += fn(conn, s.isoformat(), seg_end.isoformat())
-                s = seg_end + dt.timedelta(days=1)
+            for q_start, q_end in _quarter_segments(start, end):
+                key = f"{q_start.year}-Q{(q_start.month - 1) // 3 + 1}"
+                elapsed = q_end < today          # 整季已結束（歷史真值穩定）
+                if elapsed and key in done:
+                    continue
+                counts[mkt] += fn(conn, max(q_start, lo).isoformat(),
+                                  min(q_end, hi).isoformat())
+                if elapsed:
+                    db.merge_range(conn, dataset, key, key, key, now)
+                conn.commit()                    # 每段落地：下一段網路請求前不持寫鎖
         except Exception as ex:  # noqa: BLE001
+            conn.commit()                        # 已抓段落保留，不整批回滾
             log.warning("除權息官方源 %s 失敗（該市場維持 FinMind）：%s", mkt, str(ex)[:100])
             counts[mkt] = -1
     # 除權息預告（未來日程快照，供決策避開/預期即將除權息標的）
-    n_fc = twse_source.fetch_dividend_forecast(conn)
-    if n_fc:
-        log.info("除權息預告更新 %d 筆", n_fc)
-    conn.commit()
+    try:
+        n_fc = twse_source.fetch_dividend_forecast(conn)
+        conn.commit()
+        if n_fc:
+            log.info("除權息預告更新 %d 筆", n_fc)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("除權息預告更新失敗：%s", str(ex)[:100])
     return counts
 
 

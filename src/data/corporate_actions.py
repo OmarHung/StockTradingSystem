@@ -31,6 +31,20 @@ def detect(conn, stock_id: str | None = None) -> int:
     """
     where = "WHERE stock_id=?" if stock_id else ""
     params: tuple = (stock_id,) if stock_id else ()
+
+    # 自清理：移除與 dividend 同日的 capital_change 誤判列。早期版本在 dividend
+    # 尚未入庫時就偵測，除息跳空（>15%）被誤判成減資寫入本表，之後與同日除息
+    # 事件疊乘造成還原價雙重調整。dividend 是同日事件權威來源，這裡實體移除誤判
+    # （query 層另有 NOT EXISTS 防護；此處讓每次回補自愈，涵蓋既有壞資料）。
+    cleaned = conn.execute(
+        "DELETE FROM capital_change WHERE EXISTS ("
+        "  SELECT 1 FROM dividend d WHERE d.stock_id=capital_change.stock_id "
+        "  AND d.date=capital_change.date)"
+        + (" AND stock_id=?" if stock_id else ""),
+        params).rowcount
+    if cleaned:
+        log.info("清理與除權息同日的公司行動誤判：%d 列", cleaned)
+
     rows = conn.execute(f"""
         WITH seq AS (
             SELECT stock_id, date, close,

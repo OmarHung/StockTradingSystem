@@ -16,6 +16,7 @@ import datetime as dt
 from src import jobs
 from src.config import get_settings
 from src.data import database as db
+from src.data import market_calendar as mcal
 from src.logging_setup import get_logger
 
 log = get_logger("scheduler")
@@ -109,10 +110,12 @@ def _ran_today(name: str, today: str) -> bool:
 
 
 def _due(name: str, spec_cfg: dict, now: dt.datetime) -> bool:
-    """今天(平日)、已過設定時間、今天沒跑過 → 到期。"""
+    """今天(交易日)、已過設定時間、今天沒跑過 → 到期。"""
     if not spec_cfg.get("enabled", False):
         return False
-    if now.weekday() >= 5:  # 週六日不跑
+    # 週末與國定假日都不跑（allow_fetch=False：asyncio 迴圈內不打網路，
+    # 假日表由 nightly 回補與各子行程 lazy 同步）
+    if not mcal.is_trading_day(now.date().isoformat(), allow_fetch=False):
         return False
     try:
         hh, mm = str(spec_cfg.get("time", "")).split(":")
@@ -160,14 +163,16 @@ def status() -> list[dict]:
             last = conn.execute(
                 "SELECT run_date, started_at, source FROM scheduler_runs "
                 "WHERE name=? ORDER BY run_date DESC LIMIT 1", (name,)).fetchone()
-            # 下次執行：今天未到時間→今天；否則下一個平日
+            # 下次執行：今天未到時間→今天；否則下一個交易日（跳過週末/假日）
             nxt = None
             try:
                 hh, mm = str(c.get("time", "")).split(":")
                 cand = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
                 if cand <= now or _ran_today(name, now.date().isoformat()):
                     cand += dt.timedelta(days=1)
-                while cand.weekday() >= 5:
+                for _ in range(30):
+                    if mcal.is_trading_day(cand.date().isoformat(), allow_fetch=False):
+                        break
                     cand += dt.timedelta(days=1)
                 nxt = cand.isoformat(timespec="minutes")
             except ValueError:
