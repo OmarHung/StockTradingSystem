@@ -98,7 +98,11 @@ def test_max_positions_reject():
 
 
 def test_cash_shrink():
-    # 名目資金 100 萬（sizing 想買 2000 股=20 萬），但現金只剩 15 萬 → 縮到 1000 股
+    # 權益 140 萬（sizing 想買 2000 股=20 萬，未觸單股 15%＝21 萬上限），
+    # 但現金只剩 15 萬 → gate ⑧ 縮到 1000 股。持倉列於他產業以免撞產業曝險閘。
     port = PortfolioState(total_capital=1_000_000, cash=150_000, peak_equity=None)
+    port.positions["2881"] = Position(shares=1000, value=1_250_000, industry="金融")
     r = evaluate(_cand(), port, CFG)
     assert r.approved and r.shares == 1000  # 縮到現金可負擔（整張）
+    assert r.reject_gate is None
+    assert r.est_cost == 100_000

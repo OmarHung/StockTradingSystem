@@ -62,8 +62,9 @@ def test_is_trading_day(cal):
     assert cal.is_trading_day("2026-01-01", allow_fetch=False) is False  # 假日（週四）
     assert cal.is_trading_day("2026-01-02", allow_fetch=False) is True   # 交易日（週五）
     assert cal.is_trading_day("2026-01-03", allow_fetch=False) is False  # 週六
-    # 未覆蓋年度：退回平日判斷（＝舊行為）
-    assert cal.is_trading_day("2024-01-01", allow_fetch=False) is True   # 週一（元旦但未同步）
+    # 未覆蓋年度：固定國定假日仍兜底為休市，其餘退回平日判斷
+    assert cal.is_trading_day("2024-01-01", allow_fetch=False) is False  # 元旦（_FIXED_HOLIDAYS 兜底）
+    assert cal.is_trading_day("2024-01-08", allow_fetch=False) is True   # 週一（平日，非固定假日）
     assert cal.is_trading_day("2024-01-06", allow_fetch=False) is False  # 週六
 
 

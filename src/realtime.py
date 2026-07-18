@@ -4,8 +4,9 @@
 - 前端開 K 線圖 → WS /api/ws/kbars/{stock_id} → 首位訂閱者觸發 shioaji subscribe
 - tick callback（shioaji 執行緒）→ call_soon_threadsafe 丟進 asyncio queue
 - 聚合器（asyncio task）：更新當前 1 分 K 與今日日 K → 廣播給該檔所有 WS 客戶端
-- 分鐘切換：完成的 1 分 K 寫入 kbar_1min、今日日 K upsert price_daily——
-  盤中日 K 圖即時跳動，收盤後 daily_quotes 官方數字覆蓋
+- 分鐘切換：完成的 1 分 K 寫入 kbar_1min；今日日 K 只走記憶體/WS 推播與
+  kbar_1min 合成，不寫 price_daily（該表為撮合/停損/新鮮度的權威收盤資料，
+  盤中未完成日 K 寫入會污染決策）——盤中日 K 圖即時跳動，收盤後由 daily_quotes 官方數字入庫
 - 最後一位客戶端離開 → unsubscribe（行情連線額度 5 條/人，省著用）
 
 時間慣例與歷史 kbars 一致：1 分 K 的 ts＝該分鐘「結束」時間（首根 09:01），
@@ -50,7 +51,7 @@ class RealtimeKbarService:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue | None = None
         self._subs: dict[str, _Sub] = {}
-        self._stream_ready = False
+        self._api_id: int | None = None   # 目前已註冊 callback 的 api 物件 identity
         self._lock = threading.Lock()
 
     # ---- 生命週期 ----
@@ -60,16 +61,34 @@ class RealtimeKbarService:
         self._queue = asyncio.Queue()
         self._loop.create_task(self._aggregate_loop())
 
-    def _ensure_stream(self) -> None:
-        """首次訂閱時才登入 shioaji 並註冊 tick callback（惰性，避免拖慢啟動）。"""
+    def _ensure_stream(self):
+        """首次訂閱時才登入 shioaji 並註冊 tick callback（惰性，避免拖慢啟動）。
+
+        回傳目前的 api 物件。券商環境切換後 shioaji_source 會登出舊 session、
+        建立全新 api 物件——此時底層 api identity 改變，須在新 api 上重新註冊
+        callback（否則 tick 綁在已登出的舊 session，即時圖表靜默停更），並讓
+        呼叫端對現有訂閱在新 api 上重新 subscribe。
+        """
         with self._lock:
-            if self._stream_ready:
-                return
+            import shioaji as sj
             from src.data import shioaji_source
             api = shioaji_source.get_api()
-            api.set_on_tick_stk_v1_callback(self._on_tick)
-            self._stream_ready = True
-            log.info("即時行情串流就緒（tick callback 已註冊）")
+            if id(api) != self._api_id:
+                api.set_on_tick_stk_v1_callback(self._on_tick)
+                first = self._api_id is None
+                self._api_id = id(api)
+                # 環境切換：現有訂閱都綁在舊 session，於新 api 上重新 subscribe
+                if not first:
+                    for sid in list(self._subs):
+                        try:
+                            c = shioaji_source.get_contract(api, sid)
+                            if c is not None:
+                                api.subscribe(c, quote_type=sj.constant.QuoteType.Tick)
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("環境切換後重新訂閱 %s 失敗：%s", sid, e)
+                log.info("即時行情串流就緒（tick callback 已註冊%s）",
+                         "" if first else "——券商環境切換，已在新連線上重註冊")
+            return api
 
     # ---- 客戶端註冊（WS 端點呼叫）----
     async def register(self, stock_id: str) -> asyncio.Queue:
@@ -100,8 +119,7 @@ class RealtimeKbarService:
     def _subscribe(self, stock_id: str) -> None:
         import shioaji as sj
         from src.data import shioaji_source
-        self._ensure_stream()
-        api = shioaji_source.get_api()
+        api = self._ensure_stream()   # 回傳已註冊 callback 的 api，避免與 get_api() 間交錯切換環境
         contract = shioaji_source.get_contract(api, stock_id)
         if contract is None:
             raise ValueError(f"查無合約 {stock_id}")
@@ -168,9 +186,8 @@ class RealtimeKbarService:
                        "partial": not sub.seen_first}
             sub.seen_first = True
             if done and not done["partial"]:
-                day_snapshot = dict(sub.day) if sub.day else None
                 asyncio.get_running_loop().run_in_executor(
-                    None, self._persist, d["code"], dict(done), day_snapshot)
+                    None, self._persist, d["code"], dict(done))
         else:
             b = sub.bar
             b["h"] = max(b["h"], d["price"])
@@ -194,8 +211,15 @@ class RealtimeKbarService:
             except asyncio.QueueFull:  # 慢客戶端：丟訊息不丟連線（下一筆會補上最新狀態）
                 pass
 
-    def _persist(self, code: str, bar: dict, day: dict | None) -> None:
-        """分鐘完成：1 分 K 入庫；今日日 K 同步 upsert（盤中讓日線圖即時）。"""
+    def _persist(self, code: str, bar: dict) -> None:
+        """分鐘完成：僅把完成的 1 分 K 入庫。
+
+        盤中合成的今日日 K 不寫進 price_daily——該表是撮合/停損/新鮮度判斷的
+        權威收盤資料（PaperBroker.execute_pending/check_stops、daily._ensure_price_fresh
+        皆把它當 T 日最終數字讀取），寫入盤中未完成的日內 OHLC 會污染這些決策路徑。
+        前端「今日日 K／即時圖表」不依賴此列：走 WS 記憶體 day 訊息即時跳動，
+        重整後由 get_price(include_today=True) 從 kbar_1min 合成，均不讀 price_daily 今日列。
+        """
         try:
             with db.connect(get_settings().db_path) as conn:
                 ts = bar["end"].strftime("%Y-%m-%d %H:%M:%S")
@@ -204,13 +228,6 @@ class RealtimeKbarService:
                     "(stock_id, ts, open, high, low, close, volume) "
                     "VALUES (?,?,?,?,?,?,?)",
                     (code, ts, bar["o"], bar["h"], bar["l"], bar["c"], bar["v"]))
-                if day:
-                    conn.execute(
-                        "INSERT OR REPLACE INTO price_daily "
-                        "(stock_id, date, open, high, low, close, volume, trading_money) "
-                        "VALUES (?,?,?,?,?,?,?,?)",
-                        (code, day["date"], day["o"], day["h"], day["l"], day["c"],
-                         day["v"], day["amt"]))
         except Exception as e:  # noqa: BLE001
             log.error("即時 K 線入庫失敗 %s：%s", code, e)
 

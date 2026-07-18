@@ -49,6 +49,8 @@ def run_technical(stock_id: str, as_of: str) -> tuple[TechnicalReport | None, di
 
 def run_chips(stock_id: str, as_of: str) -> tuple[ChipsReport | None, dict]:
     feats = F.chips_features(stock_id, as_of)
+    if not feats:
+        return None, feats
     system = (
         "你是專業台股籌碼分析師，專精三大法人動向。根據提供的『法人淨買股數』做解讀，"
         "只能引用提供的數字。輸出繁體中文。"

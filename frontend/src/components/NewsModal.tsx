@@ -1,5 +1,5 @@
 import { Newspaper } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { safeUrl } from "./Panel";
 
@@ -27,9 +27,14 @@ export function NewsModal({ onClose, onSelect }: {
   const [pickedDate, setPickedDate] = useState("");
   const [scout, setScout] = useState<Scout>(null);
 
+  const newsReq = useRef(0);   // 只認最新一次搜尋的回應（快速連續搜尋時丟棄過期回應）
   const loadNews = (q = kw, s = sid) => {
+    const seq = ++newsReq.current;
     setLoading(true);
-    api.newsAll(q, s).then(setRows).catch((e) => alert(String(e))).finally(() => setLoading(false));
+    api.newsAll(q, s)
+      .then((r) => { if (seq === newsReq.current) setRows(r); })
+      .catch((e) => { if (seq === newsReq.current) alert(String(e)); })
+      .finally(() => { if (seq === newsReq.current) setLoading(false); });
   };
   useEffect(() => { loadNews("", ""); }, []);
   useEffect(() => {

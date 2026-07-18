@@ -45,7 +45,9 @@ def chips_features(stock_id: str, as_of: str, lookback: int = 5) -> dict:
     start = _shift(as_of, lookback * 3 + 10)
     inst = q.get_institutional(stock_id, start, as_of)
     if inst.empty:
-        return {"foreign_net_5d": 0, "trust_net_5d": 0}
+        # 法人資料缺失回 {}（而非殘缺的淨買 0 dict），讓 run_chips 一致判定資料缺席並跳過，
+        # 避免把「查無資料」誤當「淨買為 0 的中性訊號」餵給 LLM。
+        return {}
     dates = sorted(inst["date"].unique())[-lookback:]
     recent = inst[inst["date"].isin(dates)]
     def net(name):

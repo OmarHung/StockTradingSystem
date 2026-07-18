@@ -50,6 +50,15 @@ def validate_fundamental(report, feats: dict, stock_id: str, as_of: str) -> tupl
     return _finish("fundamental", flags, report.confidence, stock_id, as_of)
 
 
+# 政策題材關鍵詞：policy_driven=true 時，至少要有一則標題命中才算有實據
+_POLICY_KEYWORDS = (
+    "政策", "政府", "法規", "鬆綁", "補助", "補貼", "國家隊", "公共建設", "基建",
+    "國防", "軍工", "標案", "招標", "採購", "都更", "綠能", "能源", "半導體法",
+    "晶片法", "減碳", "碳費", "淨零", "行政院", "經濟部", "國發", "立法", "修法",
+    "獎勵", "專案", "戰略", "自主", "國造",
+)
+
+
 def validate_news(report, feats: dict, stock_id: str, as_of: str) -> tuple[bool, list[str], float]:
     flags = []
     actual = feats.get("news_count")
@@ -58,6 +67,13 @@ def validate_news(report, feats: dict, stock_id: str, as_of: str) -> tuple[bool,
         flags.append(
             f"新聞則數宣稱 {report.cited_news_count} 與實際提供 {actual} 不符"
         )
+    # 內容比對：cited_news_count 幾乎必然照抄故形同虛設，真正的幻覺風險在於
+    # 對標題腦補政策題材。policy_driven=true 時，若提供的標題無任一命中政策關鍵詞，
+    # 判定為無實據的政策推斷並攔截降信心（政策訊號會拉高交易員 buy 傾向）。
+    if getattr(report, "policy_driven", False):
+        titles = " ".join(str(it.get("title", "")) for it in (feats.get("items") or []))
+        if not any(kw in titles for kw in _POLICY_KEYWORDS):
+            flags.append("policy_driven=true 但提供的新聞標題無任何政策題材關鍵詞，疑為腦補")
     return _finish("news", flags, report.confidence, stock_id, as_of)
 
 

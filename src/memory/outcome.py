@@ -44,6 +44,49 @@ def _situation_text(rec: dict) -> str:
     return " | ".join(str(x) for x in parts)
 
 
+def _ex_gap_offset(sid: str, start: str, end: str) -> dict[str, float]:
+    """回傳 {date: 累計除權息跳空幅度}——某交易日(含)之前發生過的除息名目跳空總和。
+
+    名目價評估下，除息當日開盤會較前收跳空下跌約當息值（gap=before_price-after_price），
+    使窗口內的 low 系統性偏低而誤觸名目停損。以此累計值把停損/目標同步下修，
+    抵銷跳空、只保留真實價格變動。gap<=0（除權配股使還原後不降或資料異常）者略過。
+    dividend 為同日事件權威來源，capital_change 只補非除權息的公司行動（與 query 一致）。
+    """
+    with db.connect(get_settings().db_path) as conn:
+        div = db.read_sql(
+            conn,
+            "SELECT date, before_price, after_price FROM dividend "
+            "WHERE stock_id=? AND date>? AND date<=? "
+            "AND before_price>0 AND after_price>0 "
+            "UNION ALL "
+            "SELECT c.date, c.before_price, c.after_price FROM capital_change c "
+            "WHERE c.stock_id=? AND c.date>? AND c.date<=? "
+            "AND c.before_price>0 AND c.after_price>0 "
+            "AND NOT EXISTS (SELECT 1 FROM dividend d "
+            "                WHERE d.stock_id=c.stock_id AND d.date=c.date) "
+            "ORDER BY date",
+            (sid, start, end, sid, start, end),
+        )
+    offsets: dict[str, float] = {}
+    cum = 0.0
+    for _, ev in div.iterrows():
+        gap = float(ev["before_price"]) - float(ev["after_price"])
+        if gap <= 0:
+            continue
+        cum += gap
+        offsets[str(ev["date"])] = cum
+    return offsets
+
+
+def _cum_offset_at(offsets: dict[str, float], date: str) -> float:
+    """該交易日(含)之前已發生的累計除息跳空幅度。offsets 已按日累計。"""
+    total = 0.0
+    for d, cum in offsets.items():
+        if d <= date:
+            total = cum
+    return total
+
+
 def _evaluate_one(plan_row: dict, today: str) -> dict | None:
     """回傳 {outcome, ret} 或 None（資料不足/未到期）。"""
     p = json.loads(plan_row["plan_json"])["plan"]
@@ -74,14 +117,21 @@ def _evaluate_one(plan_row: dict, today: str) -> dict | None:
     entry = fill_open
 
     window = after.head(HORIZON_DAYS)
+    # 窗口內若跨除權息日，名目價會在除息當日(含)之後整段下修跳空幅度——
+    # 觸價門檻同步下修累計息值以抵銷跳空；報酬則把已入袋的配息(off)加回，
+    # 讓填息前出場的名目賣價 + 配息＝真實總報酬（避免把配息記成價格虧損）。
+    ex_off = _ex_gap_offset(sid, as_of, str(window["date"].iloc[-1]))
     for r in window.itertuples():
-        if float(r.low) <= stop:                       # 保守：同日雙觸以停損計
+        off = _cum_offset_at(ex_off, str(r.date)) if ex_off else 0.0
+        if float(r.low) <= stop - off:                 # 保守：同日雙觸以停損計
             return {"outcome": "stopped", "ret": round(stop / entry - 1, 4)}
-        if target and float(r.high) >= float(target):
+        if target and float(r.high) >= float(target) - off:
             return {"outcome": "target_hit", "ret": round(float(target) / entry - 1, 4)}
     if len(window) < HORIZON_DAYS:
         return None                                    # 視窗未滿，之後再評
-    return {"outcome": "timeout", "ret": round(float(window["close"].iloc[-1]) / entry - 1, 4)}
+    last = window.iloc[-1]
+    ret_off = _cum_offset_at(ex_off, str(last["date"])) if ex_off else 0.0
+    return {"outcome": "timeout", "ret": round((float(last["close"]) + ret_off) / entry - 1, 4)}
 
 
 def evaluate_pending(today: str | None = None) -> dict:
@@ -107,17 +157,23 @@ def evaluate_pending(today: str | None = None) -> dict:
                 "WHERE as_of=? AND stock_id=?",
                 (res["outcome"], res["ret"], now, row["as_of"], row["stock_id"]),
             )
+            # 先逐筆 commit SQL，再寫 Chroma：與向量庫解耦，任一筆 add_experience
+            # 拋例外不會回滾整批已評估的 UPDATE，也不會讓兩庫狀態分歧或癱瘓整批。
+            conn.commit()
             rec = json.loads(row["plan_json"])
-            store.add_experience(
-                exp_id=f"{row['as_of']}_{row['stock_id']}",
-                situation=_situation_text(rec),
-                metadata={
-                    "stock_id": row["stock_id"], "as_of": row["as_of"],
-                    "action": rec["plan"].get("action", ""),
-                    "outcome": res["outcome"], "ret": res["ret"],
-                    "evaluated_at": now,
-                },
-            )
+            try:
+                store.add_experience(
+                    exp_id=f"{row['as_of']}_{row['stock_id']}",
+                    situation=_situation_text(rec),
+                    metadata={
+                        "stock_id": row["stock_id"], "as_of": row["as_of"],
+                        "action": rec["plan"].get("action", ""),
+                        "outcome": res["outcome"], "ret": res["ret"],
+                        "evaluated_at": now,
+                    },
+                )
+            except Exception as e:  # noqa: BLE001 — 向量庫故障不影響 SQL 已寫回
+                log.error("寫入經驗 %s@%s 失敗：%s", row["stock_id"], row["as_of"], e)
             done += 1
     log.info("成果評估：完成 %d 筆、未到期 %d 筆", done, skipped)
     return {"evaluated": done, "pending": skipped}

@@ -96,13 +96,19 @@ class RiskManagedScreener:
     def on_day(self, date: str, ctx) -> dict | None:
         changed = False
 
-        # 1) 每日停損檢查
+        # 1) 每日停損檢查——與 PaperBroker.check_stops 同口徑：用當日最低價觸價
+        #    （low <= stop 即觸發，非收盤跌破），否則盤中曾破停損但收盤拉回的日子
+        #    回測不出場，觸發次數少於實盤、報酬/MDD 被美化。跳空出場價的夾價
+        #    （min(stop, open)）於隔日開盤成交時體現，此處僅需一致的觸發判定。
         for sid, w in list(self._weights.items()):
             if w <= 0:
                 continue
-            price = ctx.close(sid)
             stop = self._stops.get(sid)
-            if price is not None and stop is not None and price < stop:
+            if stop is None:
+                continue
+            bar = ctx.ohlc(sid)
+            low = bar["low"] if bar else None
+            if low is not None and low <= stop:
                 self._weights[sid] = 0.0
                 self._stop_dates[sid] = date
                 self._stops.pop(sid, None)

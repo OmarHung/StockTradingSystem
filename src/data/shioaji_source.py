@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import threading
 
 import pandas as pd
 
@@ -25,13 +26,18 @@ log = get_logger(__name__)
 
 _api = None       # 模組級單例（登入一次）
 _api_mode = None  # 登入時的環境；設定改變則重新登入
+_login_lock = threading.Lock()  # 保護 _api/_api_mode 的檢查與登入（多執行緒併發首登用）
 
 
 def current_env() -> str:
-    """讀 settings.yaml 的券商環境：simulation（預設）/ production。"""
+    """讀 settings.yaml 的券商環境：simulation（預設）/ production。
+
+    不主動清 get_settings 快取——設定頁存檔時由 config_io.save_raw/set_env_var
+    統一清快取（見那裡的 cache_clear），此處若每次都清會讓 get_settings 快取形同失效，
+    且與 PaperBroker/Guard 走快取的讀取策略不一致（設定熱更新只認存檔那道入口）。
+    """
     from src.config import get_settings
     try:
-        get_settings.cache_clear()  # 設定頁可能剛改過
         return (get_settings().get("shioaji") or {}).get("environment", "simulation")
     except Exception:  # noqa: BLE001
         return "simulation"
@@ -49,22 +55,27 @@ def available() -> bool:
 def _login():
     global _api, _api_mode
     mode = current_env()
-    if _api is not None and _api_mode == mode:
+    if _api is not None and _api_mode == mode:      # 快路徑（免搶鎖）
         return _api
-    if _api is not None:  # 環境切換 → 先登出舊連線
-        try:
-            _api.logout()
-        except Exception:  # noqa: BLE001
-            pass
-        _api = None
-    import shioaji as sj
+    # 檢查與登入須在同一把鎖內完成，否則兩個「首次」執行緒會各自 login()，
+    # 建立雙 session（行情/下單連線額度有限）並讓後寫者洩漏前一條連線。
+    with _login_lock:
+        if _api is not None and _api_mode == mode:  # double-checked：搶到鎖時可能已被別的執行緒登入
+            return _api
+        if _api is not None:  # 環境切換 → 先登出舊連線
+            try:
+                _api.logout()
+            except Exception:  # noqa: BLE001
+                pass
+            _api = None
+        import shioaji as sj
 
-    simulation = mode != "production"
-    api = sj.Shioaji(simulation=simulation)
-    api.login(os.environ["SJ_API_KEY"], os.environ["SJ_SEC_KEY"])
-    _api, _api_mode = api, mode
-    log.info("shioaji 已登入（%s）", "simulation 模擬" if simulation else "⚠️ PRODUCTION 正式環境")
-    return _api
+        simulation = mode != "production"
+        api = sj.Shioaji(simulation=simulation)
+        api.login(os.environ["SJ_API_KEY"], os.environ["SJ_SEC_KEY"])
+        _api, _api_mode = api, mode
+        log.info("shioaji 已登入（%s）", "simulation 模擬" if simulation else "⚠️ PRODUCTION 正式環境")
+        return _api
 
 
 def get_api():

@@ -20,7 +20,7 @@ from src.data import market_calendar as mcal
 from src.data import query as q
 from src.env.costs import CostModel
 from src.logging_setup import get_logger
-from src.risk.guard import PortfolioState, Position
+from src.risk.guard import PortfolioState, Position, RiskConfig
 
 log = get_logger(__name__)
 
@@ -140,11 +140,14 @@ class PaperBroker:
                     shares=int(o.shares), value=cost, industry=(o.industry or ""))
         eq_hist = self.equity_history()
         peak = float(eq_hist["equity"].max()) if not eq_hist.empty else None
+        # 停損窗口須 ≥ 冷卻天數：cooldown_days 若被設成 >30（季度級冷卻），
+        # 固定 30 天窗口撈不到 31~cooldown 天前的停損，Guard 冷卻閘會靜默漏擋。
+        cooldown = RiskConfig.from_settings(cfg).cooldown_days
         return PortfolioState(
             total_capital=float(cfg["capital"]["total"]),
             cash=max(0.0, self.cash - reserved),      # 扣掉已掛委託占用的現金
             positions=positions,
-            recent_stops=self.recent_stops(as_of=as_of),
+            recent_stops=self.recent_stops(days=max(30, cooldown), as_of=as_of),
             peak_equity=peak,
         )
 

@@ -870,13 +870,20 @@ def portfolio():
 @app.post("/api/portfolio/reset")
 def portfolio_reset():
     """重置模擬帳本（清空持倉/委託/成交/權益史，現金回到設定資金）。"""
+    import sqlite3
     from src.data import database as _db
-    with _db.connect(get_settings().db_path) as conn:
-        for t in ("positions", "orders", "fills", "equity_history"):
-            conn.execute(f"DELETE FROM {t}")
-        cap = float(get_settings()["capital"]["total"])
-        conn.execute("INSERT OR REPLACE INTO broker_state (key, value) VALUES ('cash', ?)", (str(cap),))
-    return {"status": "reset", "cash": float(get_settings()["capital"]["total"])}
+    cap = float(get_settings()["capital"]["total"])
+    try:
+        # immediate 寫鎖：多步刪除＋回設 cash 成為單一交易，避免與背景任務交錯出現中間不一致
+        with _db.connect(get_settings().db_path, immediate=True) as conn:
+            for t in ("positions", "orders", "fills", "equity_history"):
+                conn.execute(f"DELETE FROM {t}")
+            conn.execute("INSERT OR REPLACE INTO broker_state (key, value) VALUES ('cash', ?)", (str(cap),))
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e):
+            raise HTTPException(409, "資料庫正被背景任務寫入中，請等任務結束或先停止任務再重置")
+        raise
+    return {"status": "reset", "cash": cap}
 
 
 @app.get("/api/calendar/status")
@@ -924,6 +931,9 @@ def daily_run(req: DailyRunReq):
     """背景執行每日主流程（撮合→風控→快照→決策掛單）。"""
     if jobs.is_running(_DAILY_JOB):
         raise HTTPException(409, "每日流程已在執行中")
+    # 比照排程器 wait_for=["backfill"]：回補進行中不啟動，避免併發寫 DB 鎖衝突、且不用未補完的 T 日資料決策
+    if jobs.is_running(_BACKFILL_JOB):
+        raise HTTPException(409, "資料回補進行中，請等回補結束再執行每日流程")
     args = ["scripts.run_daily"]
     if req.top_n:
         args += ["--top-n", str(req.top_n)]

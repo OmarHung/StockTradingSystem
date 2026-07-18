@@ -18,9 +18,11 @@ export function Watchlist({
   // ids 變動（加入/移除）即重抓報價；盤中每 5s 輪詢即時快照
   useEffect(() => {
     let cancelled = false;
+    let seq = 0;   // 只認最新一次輪詢的回應（慢回應不覆蓋較新快照）
     const load = () => {
       if (!ids.length) { setQuotes([]); return; }
-      api.quotes(ids).then((qs) => { if (!cancelled) setQuotes(qs); }).catch(() => {});
+      const my = ++seq;
+      api.quotes(ids).then((qs) => { if (!cancelled && my === seq) setQuotes(qs); }).catch(() => {});
     };
     load();
     const t = window.setInterval(() => { if (marketOpen()) load(); }, 5000);

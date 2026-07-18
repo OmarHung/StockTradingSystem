@@ -83,9 +83,23 @@ def sync_holidays(conn=None) -> dict:
     return {str(y): n for y, n in per_year.items()}
 
 
+# 固定國定假日（月-日），跨年之際次年假日表尚未同步時的保守兜底。
+# 春節為農曆浮動日期無法硬編，僅以此涵蓋確定的固定休市日（元旦、和平紀念日等）。
+_FIXED_HOLIDAYS: set[tuple[int, int]] = {
+    (1, 1),    # 元旦
+    (2, 28),   # 和平紀念日
+    (4, 4),    # 兒童節
+    (10, 10),  # 國慶日
+}
+
+
 def _maybe_sync(conn, year: int) -> None:
-    """查詢當年度且尚未覆蓋時，lazy 同步一次（失敗只記 log，判斷退回平日）。"""
-    if year != dt.date.today().year or year in _sync_attempted or _covered(conn, year):
+    """該年度尚未覆蓋時 lazy 同步一次（失敗只記 log，判斷退回平日）。
+
+    不再限定「僅當年度」：跨年前後掃描會觸及次年，TWSE 年底通常已公告次年
+    休市表，一併抓入庫；若次年表尚未公告，API 無資料，退回 _FIXED_HOLIDAYS 兜底。
+    """
+    if year in _sync_attempted or _covered(conn, year):
         return
     _sync_attempted.add(year)
     try:
@@ -111,11 +125,20 @@ def is_trading_day(date_str: str, allow_fetch: bool = True) -> bool:
 
 
 def _is_trading_day_conn(conn, date_str: str) -> bool:
-    """交易日判斷（用已開啟的連線；週末→False、假日表命中→False）。"""
-    if dt.date.fromisoformat(date_str).weekday() >= 5:
+    """交易日判斷（用已開啟的連線；週末→False、假日表命中→False）。
+
+    該年度假日表尚未覆蓋（如跨年時次年表未同步）時，退回 _FIXED_HOLIDAYS 兜底，
+    避免把元旦等固定休市日誤判為交易日；春節等浮動假日仍須靠同步表涵蓋。
+    """
+    d = dt.date.fromisoformat(date_str)
+    if d.weekday() >= 5:
         return False
-    return conn.execute("SELECT 1 FROM market_holiday WHERE date=?",
-                        (date_str,)).fetchone() is None
+    if conn.execute("SELECT 1 FROM market_holiday WHERE date=?",
+                    (date_str,)).fetchone() is not None:
+        return False
+    if not _covered(conn, d.year) and (d.month, d.day) in _FIXED_HOLIDAYS:
+        return False
+    return True
 
 
 def next_trading_day(date_str: str, allow_fetch: bool = True) -> str:
@@ -130,6 +153,9 @@ def next_trading_day(date_str: str, allow_fetch: bool = True) -> str:
             _maybe_sync(conn, d.year)
         for _ in range(30):   # 春節連假最長也遠小於 30 天，防呆上限
             d += dt.timedelta(days=1)
+            # 掃描跨到下一年度時，一併同步該年假日表（年底掛單/排程避免誤判元旦、春節）
+            if allow_fetch:
+                _maybe_sync(conn, d.year)
             if _is_trading_day_conn(conn, d.isoformat()):
                 return d.isoformat()
     return d.isoformat()

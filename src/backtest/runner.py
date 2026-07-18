@@ -13,6 +13,7 @@ from src.backtest.strategies import (
     ScreenerStrategy,
 )
 from src.config import get_settings
+from src.data import database as db
 from src.data import query as q
 from src.env.costs import CostModel
 from src.env.tw_env import Backtester
@@ -41,6 +42,28 @@ def load_prices(stock_ids: list[str], start: str, end: str) -> dict[str, pd.Data
     if bulk.empty:
         return {}
     return {sid: g.reset_index(drop=True) for sid, g in bulk.groupby("stock_id")}
+
+
+def pit_universe(start: str, end: str) -> list[str]:
+    """回測用 point-in-time 股票池：在 [start, end] 區間內「當時仍在市」的個股。
+
+    以 price_daily 於區間內是否有成交資料為在市判準（下市股的歷史 K 線仍保留），
+    結構性過濾與 all_stock_ids 同口徑（上市櫃普通股、排除指數/ETF/非四碼），但
+    **刻意不套 delisted 旗標**——該旗標反映「現在時點」是否下市，用它過濾會系統性
+    排除區間後才下市的公司，造成存活者偏差（前視）。區間內曾在市即納入，讓回測選股
+    宇宙涵蓋最終下市股，其下市造成的虧損才進得了回測。
+    """
+    sql = (
+        "SELECT DISTINCT p.stock_id FROM price_daily p "
+        "JOIN stock_info s ON s.stock_id = p.stock_id "
+        "WHERE s.type IN ('twse','tpex') "
+        "AND p.date >= ? AND p.date <= ? "
+        "AND p.stock_id GLOB '[0-9][0-9][0-9][0-9]' AND p.stock_id NOT LIKE '00%' "
+        "ORDER BY p.stock_id"
+    )
+    with db.connect(get_settings().db_path) as conn:
+        df = db.read_sql(conn, sql, (start, end))
+    return df["stock_id"].tolist()
 
 
 def _month_starts(dates: list[str]) -> list[str]:
@@ -81,7 +104,9 @@ def run_backtest(
     """
     cfg = cfg or get_settings()
     initial_cash = initial_cash or cfg["capital"]["total"]
-    universe = universe or q.all_stock_ids()
+    # 未指定股票池時，用 point-in-time 在市清單（含區間後才下市者），避免存活者偏差；
+    # pit 池為空（如資料未回補）才退回當前上市清單
+    universe = universe or pit_universe(start, end) or q.all_stock_ids()
     cost = CostModel()
     warmup_start = _shift_back(start, _WARMUP_DAYS)   # 暖身：多載入 start 之前的歷史
 

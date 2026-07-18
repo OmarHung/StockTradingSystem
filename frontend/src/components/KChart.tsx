@@ -194,12 +194,16 @@ export function KChart({
       // 斷線自動重連（退避 3s→最多 15s）：API 重啟/連線中斷後，副標仍顯示「即時」
       // 但圖表靜止是有實害的靜默失效，長開頁面幾乎必遇。
       let wsRetry = 3000;
+      // 歷史尾根量能重疊校正只在首次連線有效：斷線重連後歷史尾根量早已被
+      // 前次連線的即時桶量覆蓋，histLastVol 已陳舊，再參與 Math.max 會失真。
+      let reconnected = false;
       const connectWs = () => {
         if (cancelled) return;
         ws = api.kbarsWs(stockId);
         ws.onopen = () => { wsRetry = 3000; };
         ws.onclose = () => {
           if (cancelled) return;
+          reconnected = true;
           reconnectTimer = window.setTimeout(connectWs, wsRetry);
           wsRetry = Math.min(wsRetry * 1.5, 15000);
         };
@@ -218,7 +222,7 @@ export function KChart({
                 low: Math.min(existing.low, m.l), close: m.c }
             : { time: bucket, open: m.o, high: m.h, low: m.l, close: m.c };
           // 與歷史尾根重疊時無法得知已含多少量 → 取較大者（暫態，下次載入自動校正）
-          const v = existing && histLast && String(histLast.time) === String(bucket)
+          const v = !reconnected && existing && histLast && String(histLast.time) === String(bucket)
             ? Math.max(histLastVol, volSum) : volSum;
           commitLive(merged, v);
         } else if (m.type === "day" && tf === "D") {

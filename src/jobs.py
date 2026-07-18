@@ -18,6 +18,9 @@ JOBS_DIR = ROOT / "logs" / "jobs"
 
 # 本程序啟動的 job handle（poll() 會正確 reap 子程序，避免殭屍誤判存活）
 _PROCS: dict[str, subprocess.Popen] = {}
+# 子行程結束後保留其 exit code（reap 後 handle 會從 _PROCS 移除，需另存供事後查詢）——
+# 排程器靠它判斷「已啟動的 job 是否真的成功跑完」，崩潰(非0)時才允許當天補跑。
+_LAST_EXIT: dict[str, int] = {}
 # start_job 的 check-then-act 需序列化：API 同步端點跑在 threadpool、排程器跑在
 # event loop，兩者可真正並行呼叫 start_job（前端連點/排程撞手動）；無鎖時都先看到
 # is_running=False 再各自 spawn → 兩個同名子行程搶 DB 寫鎖、pid 檔互蓋、log 錯亂。
@@ -27,6 +30,37 @@ _start_lock = threading.Lock()
 def _paths(name: str) -> tuple[Path, Path]:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     return JOBS_DIR / f"{name}.log", JOBS_DIR / f"{name}.pid"
+
+
+def _exit_path(name: str) -> Path:
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    return JOBS_DIR / f"{name}.exit"
+
+
+def _record_exit(name: str, code: int) -> None:
+    """記錄子行程結束碼（記憶體 + 檔案，供跨端點/事後查詢）。"""
+    _LAST_EXIT[name] = code
+    try:
+        _exit_path(name).write_text(str(code))
+    except OSError:
+        pass
+
+
+def last_exit_code(name: str) -> int | None:
+    """回傳上一輪子行程的結束碼；未曾結束或無紀錄則 None。
+
+    僅在 is_running(name) 回 False（子行程確實已死）後查詢才有意義；
+    仍在跑時回傳的是更早那輪的結束碼。
+    """
+    if name in _LAST_EXIT:
+        return _LAST_EXIT[name]
+    p = _exit_path(name)
+    if not p.exists():
+        return None
+    try:
+        return int(p.read_text().strip())
+    except (ValueError, OSError):
+        return None
 
 
 def start_job(name: str, args: list[str]) -> bool:
@@ -42,6 +76,12 @@ def start_job(name: str, args: list[str]) -> bool:
         if log_path.exists():
             # 保留上一輪輸出（含崩潰 traceback）供除錯，否則覆寫後死無對證
             log_path.replace(log_path.with_suffix(".prev.log"))
+        # 清掉上一輪的結束碼：新一輪視為執行中，避免 last_exit_code 回舊值誤判
+        _LAST_EXIT.pop(name, None)
+        try:
+            _exit_path(name).unlink()
+        except OSError:
+            pass
         log_f = open(log_path, "w", encoding="utf-8")
         proc = subprocess.Popen(
             [sys.executable, "-m", *args],
@@ -59,7 +99,9 @@ def is_running(name: str) -> bool:
     # 1) 我們自己啟動的：用 poll()（會 reap，殭屍不會誤判為存活）
     proc = _PROCS.get(name)
     if proc is not None:
-        if proc.poll() is not None:
+        rc = proc.poll()
+        if rc is not None:
+            _record_exit(name, rc)  # reap 當下抓結束碼，供排程判斷是否成功
             _PROCS.pop(name, None)
             return False
         return True
@@ -78,8 +120,9 @@ def is_running(name: str) -> bool:
         return False
     # pid 存活但可能是殭屍（已死、父程序未 reap）→ 嘗試收屍確認
     try:
-        wpid, _ = os.waitpid(pid, os.WNOHANG)
+        wpid, status = os.waitpid(pid, os.WNOHANG)
         if wpid == pid:
+            _record_exit(name, os.waitstatus_to_exitcode(status))
             return False  # 剛收掉的殭屍
     except ChildProcessError:
         pass  # 不是我們的子程序，無法 waitpid，維持存活判定

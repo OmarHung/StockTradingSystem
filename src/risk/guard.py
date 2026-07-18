@@ -64,11 +64,15 @@ class RiskConfig:
     max_drawdown_halt_pct: float = 15.0
     max_industry_pct: float = 30.0
     max_positions: int = 10
+    # 縮股後的最小可交易投入金額（元）：低於此值的碎單經濟上不划算
+    # （最低手續費 20 元雙邊、佔一個 max_positions 名額），寧可駁回。
+    min_trade_value: float = 10000.0
     blacklist: set[str] = field(default_factory=set)
 
     @classmethod
     def from_settings(cls, cfg) -> "RiskConfig":
-        r = cfg["risk"]
+        # 缺 risk 區塊時退回全預設（避免呼叫端如 portfolio_state 因設定不全硬崩）
+        r = cfg.get("risk", {}) if hasattr(cfg, "get") else cfg["risk"]
         return cls(
             per_trade_risk_pct=float(r.get("per_trade_risk_pct", 1.0)),
             max_single_position_pct=float(r.get("max_single_position_pct", 15.0)),
@@ -77,6 +81,7 @@ class RiskConfig:
             max_drawdown_halt_pct=float(r.get("max_drawdown_halt_pct", 15.0)),
             max_industry_pct=float(r.get("max_industry_pct", 30.0)),
             max_positions=int(r.get("max_positions", 10)),
+            min_trade_value=float(r.get("min_trade_value", 10000.0)),
         )
 
 
@@ -158,14 +163,17 @@ def evaluate(cand: TradeCandidate, port: PortfolioState, cfg: RiskConfig,
     r._log("cooldown", True, "非冷卻期")
 
     # ⑤ 風險部位計算
-    shares = position_size(port.total_capital, cfg.per_trade_risk_pct,
+    # 分母用即時權益（與 ② 回撤閘同一基準）：風險比例隨真實淨值縮放，
+    # 避免帳戶偏離初始資本後每筆固定風險比例失準（虧損期反而超量建倉）。
+    equity = port.equity
+    shares = position_size(equity, cfg.per_trade_risk_pct,
                            cand.entry, cand.stop_loss)
     if shares <= 0:
         return reject("sizing", "風險預算不足以買進任何股數")
     cost = shares * cand.entry
 
     # ⑥ 單股上限（超過則縮減部位，而非直接駁回）
-    max_pos_value = port.total_capital * cfg.max_single_position_pct / 100.0
+    max_pos_value = equity * cfg.max_single_position_pct / 100.0
     existing = port.positions.get(cand.stock_id)
     existing_value = existing.value if existing else 0.0
     if existing_value + cost > max_pos_value:
@@ -176,16 +184,19 @@ def evaluate(cand: TradeCandidate, port: PortfolioState, cfg: RiskConfig,
         if shares <= 0:
             return reject("single_position", "單股上限內已無可加碼空間")
         cost = shares * cand.entry
+        if cost < cfg.min_trade_value:
+            return reject("single_position",
+                          f"單股上限壓縮後僅 {cost:,.0f} 元 < 最小交易規模 {cfg.min_trade_value:,.0f}，不划算")
         r._log("single_position", True, f"縮減至 {shares} 股以符合單股上限")
     else:
-        r._log("single_position", True, f"{(existing_value + cost) / port.total_capital * 100:.1f}% ≤ {cfg.max_single_position_pct}%")
+        r._log("single_position", True, f"{(existing_value + cost) / equity * 100:.1f}% ≤ {cfg.max_single_position_pct}%")
     r._log("sizing", True, f"風險部位 {shares} 股（風險 {shares * (cand.entry - cand.stop_loss):,.0f} 元）")
 
     # ⑦ 產業曝險上限
     if cand.industry:
         industry_value = sum(p.value for p in port.positions.values()
                              if p.industry == cand.industry) + cost
-        industry_pct = industry_value / port.total_capital * 100
+        industry_pct = industry_value / equity * 100
         if industry_pct > cfg.max_industry_pct:
             return reject("industry_exposure",
                           f"產業「{cand.industry}」曝險 {industry_pct:.1f}% > 上限 {cfg.max_industry_pct}%")
@@ -200,6 +211,9 @@ def evaluate(cand: TradeCandidate, port: PortfolioState, cfg: RiskConfig,
         if affordable <= 0:
             return reject("cash", f"現金不足（需 {cost:,.0f}，餘 {port.cash:,.0f}）")
         shares, cost = affordable, affordable * cand.entry
+        if cost < cfg.min_trade_value:
+            return reject("cash",
+                          f"現金壓縮後僅 {cost:,.0f} 元 < 最小交易規模 {cfg.min_trade_value:,.0f}，不划算")
         r._log("cash", True, f"現金受限，縮減至 {shares} 股")
     else:
         r._log("cash", True, "現金充足")

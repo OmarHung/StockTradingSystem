@@ -21,7 +21,12 @@ export function TopBar({ hasKey, brokerEnv, onOpenSettings, onOpenData, onOpenBr
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     // 大盤指數：盤中每 30s 重抓（原本只在掛載時抓一次，長開頁面盤中一直顯示開頁快照）
-    const loadIndices = () => api.indices().then(setIndices).catch(() => {});
+    // idxSeq 只認最新一次請求的回應：慢回應（延遲超過輪詢間隔）不覆蓋較新指數
+    let idxSeq = 0;
+    const loadIndices = () => {
+      const my = ++idxSeq;
+      api.indices().then((v) => { if (my === idxSeq) setIndices(v); }).catch(() => {});
+    };
     loadIndices();
     const idx = setInterval(() => { if (marketOpen()) loadIndices(); }, 30_000);
     const loadUsage = () => api.llmUsage().then(setUsage).catch(() => {});

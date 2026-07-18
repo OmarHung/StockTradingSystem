@@ -187,8 +187,13 @@ def analyze_stocks(stock_ids: list[str], as_of: str,
 
 
 def _entry(report, confidence, flags) -> dict:
+    rpt = report.model_dump()
+    # 驗證層攔截（flags 非空）時，就地把 report 內的 confidence 覆寫為降後值——
+    # 否則交易員 prompt 會同時看到原始高信心與 adjusted_confidence，硬性防線形同虛設。
+    if flags:
+        rpt["confidence"] = round(confidence, 3)
     return {
-        "report": report.model_dump(),
+        "report": rpt,
         "adjusted_confidence": round(confidence, 3),
         "validation_flags": flags,
     }

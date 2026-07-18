@@ -18,7 +18,7 @@ def broker(tmp_path, monkeypatch):
     class FakeSettings:
         db_path = dbfile
         def __getitem__(self, k):
-            return {"capital": {"total": 1_000_000}}[k]
+            return {"capital": {"total": 1_000_000}, "risk": {}}[k]
 
     import src.broker.paper as paper_mod
     import src.data.market_calendar as mcal_mod

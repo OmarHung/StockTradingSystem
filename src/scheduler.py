@@ -4,9 +4,12 @@
 實際工作仍透過 src/jobs.py 開獨立子行程執行（與 WebUI 手動觸發同一路徑），
 所以 pipeline 崩潰不影響 API、API 重啟也只是暫停觸發、不會殺掉進行中的工作。
 
-補跑語義：每 30 秒檢查一次「今天(平日)、已過設定時間、今天還沒跑過、job 沒在跑」
-→ 觸發。因此 API 行程在排定時間之後才啟動（如中午開機），當天仍會補跑一次。
-執行紀錄存 DB scheduler_runs 表（每 job 每天一列，UPSERT）。
+補跑語義：每 30 秒檢查一次「今天(平日)、已過設定時間、job 沒在跑」且
+「今天還沒成功跑完 且 未達重試上限」→ 觸發。因此 API 行程在排定時間之後才
+啟動（如中午開機），當天仍會補跑一次。
+執行紀錄存 DB scheduler_runs 表（每 job 每天一列，UPSERT）：記 started/finished
+兩態與嘗試次數——子行程啟動後即崩潰（exit≠0）時，當天仍會有限次數補跑，
+不會因「已 spawn 過一次」就整天靜默不再跑。
 """
 from __future__ import annotations
 
@@ -59,12 +62,19 @@ JOB_DEFS = {
 
 _DEFER_LOGGED: set[tuple[str, str]] = set()  # (job, date) 延後只記一次 log，避免每 30 秒洗版
 
+# 非 keepalive job 子行程崩潰後，當天最多再補跑幾次（含首次共 MAX 次啟動）——
+# 有上限以免資料源/DB 持續異常時每 30 秒無限重啟燒資源。
+_MAX_ATTEMPTS = 3
+
 _DDL = """
     CREATE TABLE IF NOT EXISTS scheduler_runs (
-        name       TEXT NOT NULL,
-        run_date   TEXT NOT NULL,     -- 觸發日 YYYY-MM-DD
-        started_at TEXT,
-        source     TEXT,              -- schedule / manual
+        name        TEXT NOT NULL,
+        run_date    TEXT NOT NULL,     -- 觸發日 YYYY-MM-DD
+        started_at  TEXT,
+        finished_at TEXT,              -- 子行程結束時間；NULL=執行中/未結算
+        exit_code   INTEGER,           -- 子行程結束碼；0=成功
+        attempts    INTEGER DEFAULT 0, -- 今日已啟動次數（含崩潰重試）
+        source      TEXT,              -- schedule / manual
         PRIMARY KEY (name, run_date)
     )
 """
@@ -73,6 +83,16 @@ _DDL = """
 def _conn():
     conn = db.get_connection(get_settings().db_path)
     conn.execute(_DDL)
+    # 舊表遷移：補上 started/finished 兩態欄位（舊資料視為已成功、不再補跑）
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scheduler_runs)").fetchall()}
+    for ddl in (
+        "ALTER TABLE scheduler_runs ADD COLUMN finished_at TEXT",
+        "ALTER TABLE scheduler_runs ADD COLUMN exit_code INTEGER",
+        "ALTER TABLE scheduler_runs ADD COLUMN attempts INTEGER DEFAULT 0",
+    ):
+        col = ddl.split("ADD COLUMN ")[1].split()[0]
+        if col not in cols:
+            conn.execute(ddl)
     return conn
 
 
@@ -100,11 +120,15 @@ def trigger(name: str, source: str = "schedule") -> bool:
     ok = jobs.start_job(spec["job_name"], spec["args"])
     if ok:
         now = dt.datetime.now()
+        # 標記為「執行中」：started_at 更新、finished_at/exit_code 清空、attempts+1。
+        # 子行程實際跑完與否由 _settle() 事後結算（見下），此處不代表成功。
         with _conn() as conn:
             conn.execute(
-                "INSERT INTO scheduler_runs (name, run_date, started_at, source) "
-                "VALUES (?,?,?,?) ON CONFLICT(name, run_date) DO UPDATE SET "
-                "started_at=excluded.started_at, source=excluded.source",
+                "INSERT INTO scheduler_runs "
+                "(name, run_date, started_at, finished_at, exit_code, attempts, source) "
+                "VALUES (?,?,?,NULL,NULL,1,?) ON CONFLICT(name, run_date) DO UPDATE SET "
+                "started_at=excluded.started_at, finished_at=NULL, exit_code=NULL, "
+                "attempts=scheduler_runs.attempts+1, source=excluded.source",
                 (name, now.date().isoformat(), now.isoformat(timespec="seconds"), source),
             )
             conn.commit()
@@ -113,10 +137,53 @@ def trigger(name: str, source: str = "schedule") -> bool:
 
 
 def _ran_today(name: str, today: str) -> bool:
+    """今天曾被觸發過（不論成敗）——供 status 顯示「下次執行」用。"""
     with _conn() as conn:
         r = conn.execute("SELECT 1 FROM scheduler_runs WHERE name=? AND run_date=?",
                          (name, today)).fetchone()
     return r is not None
+
+
+def _settle(name: str, today: str) -> None:
+    """結算今日「已啟動但尚未記錄結束」的 job：子行程已不在跑就寫入結束碼。
+
+    排程無法在子行程結束時收到回呼，故由檢查迴圈輪到時被動結算——只要子行程
+    已死（is_running=False）且該日 row 仍是執行中狀態（finished_at IS NULL），
+    就把 jobs.last_exit_code 落庫，讓 _due 判斷是否需補跑。
+    """
+    with _conn() as conn:
+        r = conn.execute(
+            "SELECT started_at FROM scheduler_runs "
+            "WHERE name=? AND run_date=? AND finished_at IS NULL",
+            (name, today)).fetchone()
+        if r is None:
+            return  # 今天沒啟動過，或已結算
+        spec = JOB_DEFS[name]
+        if jobs.is_running(spec["job_name"]):
+            return  # 還在跑，先不結算
+        code = jobs.last_exit_code(spec["job_name"])
+        # code 可能為 None（跨行程重啟後拿不到結束碼）——保守視為成功，
+        # 避免把「其實已跑完、只是本行程沒接到結束碼」的 job 重複補跑。
+        exit_code = 0 if code is None else code
+        conn.execute(
+            "UPDATE scheduler_runs SET finished_at=?, exit_code=? "
+            "WHERE name=? AND run_date=? AND finished_at IS NULL",
+            (dt.datetime.now().isoformat(timespec="seconds"), exit_code, name, today),
+        )
+        conn.commit()
+        if exit_code != 0:
+            log.warning("排程 %s 子行程異常結束（exit=%s）", name, exit_code)
+
+
+def _run_state(name: str, today: str) -> dict | None:
+    """回今日該 job 的執行紀錄（attempts/finished_at/exit_code），無則 None。"""
+    with _conn() as conn:
+        r = conn.execute(
+            "SELECT attempts, finished_at, exit_code FROM scheduler_runs "
+            "WHERE name=? AND run_date=?", (name, today)).fetchone()
+    if r is None:
+        return None
+    return {"attempts": r[0] or 0, "finished_at": r[1], "exit_code": r[2]}
 
 
 def _due(name: str, spec_cfg: dict, now: dt.datetime) -> bool:
@@ -143,7 +210,18 @@ def _due(name: str, spec_cfg: dict, now: dt.datetime) -> bool:
         except ValueError:
             return False
         return now < until and not jobs.is_running(spec["job_name"])
-    return not _ran_today(name, now.date().isoformat())
+    # 非 keepalive（daily/dataupdate/nightly）：先結算上一輪，再判是否需（補）跑。
+    today = now.date().isoformat()
+    _settle(name, today)
+    st = _run_state(name, today)
+    if st is None:
+        return True  # 今天還沒啟動過
+    if st["finished_at"] is None:
+        return False  # 執行中（或子行程仍在跑，_settle 未結算）
+    if st["exit_code"] == 0:
+        return False  # 已成功跑完
+    # 上一輪崩潰：未達重試上限才補跑
+    return st["attempts"] < _MAX_ATTEMPTS
 
 
 async def run_loop(interval_sec: int = 30) -> None:
@@ -180,8 +258,9 @@ def status() -> list[dict]:
         for name, spec in JOB_DEFS.items():
             c = cfg.get(name, {})
             last = conn.execute(
-                "SELECT run_date, started_at, source FROM scheduler_runs "
-                "WHERE name=? ORDER BY run_date DESC LIMIT 1", (name,)).fetchone()
+                "SELECT run_date, started_at, source, finished_at, exit_code, attempts "
+                "FROM scheduler_runs WHERE name=? ORDER BY run_date DESC LIMIT 1",
+                (name,)).fetchone()
             # 下次執行：今天未到時間→今天；否則下一個交易日（跳過週末/假日）
             nxt = None
             try:
@@ -201,7 +280,9 @@ def status() -> list[dict]:
                 "enabled": bool(c.get("enabled", False)),
                 "time": str(c.get("time", "")),
                 "running": jobs.is_running(spec["job_name"]),
-                "last_run": ({"date": last[0], "started_at": last[1], "source": last[2]}
+                "last_run": ({"date": last[0], "started_at": last[1], "source": last[2],
+                              "finished_at": last[3], "exit_code": last[4],
+                              "attempts": last[5] or 0}
                              if last else None),
                 "next_run": nxt if c.get("enabled", False) else None,
                 "log_tail": "\n".join(

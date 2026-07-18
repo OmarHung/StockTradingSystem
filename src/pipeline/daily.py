@@ -12,12 +12,38 @@ run_daily(as_of) 依台股日節奏執行：
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from src.broker.paper import PaperBroker
 from src.config import get_settings
 from src.logging_setup import get_logger
 
 log = get_logger("daily")
+
+_TAIPEI = ZoneInfo("Asia/Taipei")
+_MARKET_CLOSE = "13:30"          # 台股收盤時間（撮合/停損以收盤定案的最早安全時點）
+
+
+def _now_taipei() -> dt.datetime:
+    """當前台北時間（VPS 可能落在其他時區，收盤判斷一律以台北為準）。"""
+    return dt.datetime.now(_TAIPEI)
+
+
+def _closing_settled(as_of: str) -> bool:
+    """as_of 當日行情是否已定案，可安全做撮合/停損/快照結算。
+
+    as_of 早於今天（台北）＝歷史交易日重放，行情早已定案 → True；
+    as_of 就是今天則須已過收盤（含台北時區）才 True，否則盤中手動觸發
+    會拿仍在變動的 open/low/high 永久扣現金、刪持倉、寫 fills。
+    as_of 若為未來日（不應發生）保守視為未定案。
+    """
+    now = _now_taipei()
+    today = now.date().isoformat()
+    if as_of < today:
+        return True
+    if as_of > today:
+        return False
+    return now.strftime("%H:%M") >= _MARKET_CLOSE
 
 
 def run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
@@ -63,23 +89,42 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
         summary["data_note"] = fresh_note
         log.warning("價格資料未更新到 %s：%s", as_of, fresh_note)
 
-    # ① 開盤撮合昨日委託
-    fills = broker.execute_pending(as_of)
-    summary["morning_fills"] = fills
-    for f in fills:
-        log.info("開盤撮合 %s: %s", f.get("stock_id"), f.get("status"))
+    # 收盤結算閘門：撮合/停損/快照全靠 as_of 當日的 open/low/high 定案帳務，
+    # 這些值在收盤前仍在變動，盤中撮合＝以尚未定案的行情永久扣現金/刪持倉。
+    # 唯有 as_of 就是「今天（台北）」且尚未過收盤才擋——歷史日重放（as_of 為
+    # 過去交易日，行情早已定案）照常結算。
+    settled = _closing_settled(as_of)
+    summary["closing_settled"] = settled
+    if settled:
+        # ① 開盤撮合昨日委託
+        fills = broker.execute_pending(as_of)
+        summary["morning_fills"] = fills
+        for f in fills:
+            log.info("開盤撮合 %s: %s", f.get("stock_id"), f.get("status"))
 
-    # ② 停損/停利
-    exits = broker.check_stops(as_of)
-    summary["exits"] = exits
-    for e in exits:
-        log.info("風控出場 %s [%s] 價 %s 損益 %s", e["stock_id"], e["reason"], e["price"], e["pnl"])
+        # ② 停損/停利
+        exits = broker.check_stops(as_of)
+        summary["exits"] = exits
+        for e in exits:
+            log.info("風控出場 %s [%s] 價 %s 損益 %s", e["stock_id"], e["reason"], e["price"], e["pnl"])
 
-    # ③ 權益快照
-    snap = broker.mark_to_market(as_of)
-    summary["equity"] = snap
-    log.info("權益快照 %s：現金 %s + 持倉 %s = %s",
-             as_of, f"{snap['cash']:,.0f}", f"{snap['positions_value']:,.0f}", f"{snap['equity']:,.0f}")
+        # ③ 權益快照
+        snap = broker.mark_to_market(as_of)
+        summary["equity"] = snap
+        log.info("權益快照 %s：現金 %s + 持倉 %s = %s",
+                 as_of, f"{snap['cash']:,.0f}", f"{snap['positions_value']:,.0f}", f"{snap['equity']:,.0f}")
+    else:
+        # 盤中手動觸發：只跑決策掛單（下方 ④），跳過所有以當日行情定案帳務的步驟
+        summary["morning_fills"] = []
+        summary["exits"] = []
+        log.warning("⛔ %s 尚未收盤（台北時間 %s < %s），跳過撮合/停損/快照，"
+                    "僅執行盤後決策；結算步驟待收盤後再跑", as_of,
+                    _now_taipei().strftime("%H:%M"), _MARKET_CLOSE)
+        from src.notify import telegram
+        telegram.send_error_alert(
+            "收盤結算延後：尚未過收盤時間",
+            f"as_of={as_of}：當前台北時間 {_now_taipei().strftime('%H:%M')} 未達收盤 "
+            f"{_MARKET_CLOSE}，撮合/停損/快照跳過（避免以盤中行情定案帳務）。")
 
     # ⑤ 每週最後交易日：成果評估 + 反思（在決策前，讓新規則立即生效）。
     # 用「下一交易日落在不同 ISO 週」判定，而非死綁週五——週五逢國定假日時，
@@ -113,9 +158,12 @@ def _run_daily(as_of: str | None = None, top_n: int = 3, decide: bool = True,
     if not data_fresh:
         from src.notify import telegram
         log.warning("⛔ 價格資料未達 %s（%s），跳過決策與掛單", as_of, fresh_note)
+        # 保護性步驟是否實際執行，取決於收盤結算閘門：收盤前盤中觸發時同樣被跳過
+        _protective = ("保護性步驟（撮合/停損/快照）已照常執行。" if settled
+                       else "保護性步驟（撮合/停損/快照）因尚未收盤同步跳過，待收盤後再跑。")
         telegram.send_error_alert(
             "盤後決策跳過：價格資料未更新",
-            f"as_of={as_of}：{fresh_note}\n保護性步驟（撮合/停損/快照）已照常執行。")
+            f"as_of={as_of}：{fresh_note}\n{_protective}")
         summary["orders"] = []
         return summary
 
